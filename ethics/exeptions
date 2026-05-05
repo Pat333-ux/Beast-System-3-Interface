@@ -1,0 +1,213 @@
+// beast-system-3-interfaces/src/ethics/exceptions.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory exception registry
+const ETHICAL_EXCEPTIONS: any[] = [];
+
+/**
+ * POST /ethics/exceptions
+ * Register an ethical exception request.
+ */
+router.post("/ethics/exceptions", async (req: Request, res: Response) => {
+  try {
+    const {
+      exception_id,
+      action_id,
+      actor_id,
+      exception_type,
+      justification,
+      severity,
+      metadata,
+    } = req.body || {};
+
+    if (!action_id || !actor_id || !exception_type || !justification) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          action_id: !action_id,
+          actor_id: !actor_id,
+          exception_type: !exception_type,
+          justification: !justification,
+        },
+      });
+    }
+
+    const entry = {
+      exception_id: exception_id || cryptoRandomId(),
+      action_id,
+      actor_id,
+      exception_type, // emergency_override | dignity_override | documentation_override | governance_override
+      justification,
+      severity: severity || "medium",
+      status: "pending_review",
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    ETHICAL_EXCEPTIONS.unshift(entry);
+
+    return res.status(201).json({
+      status: "submitted",
+      exception: entry,
+    });
+
+  } catch (err) {
+    console.error("ethics exceptions write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /ethics/exceptions/evaluate
+ * Evaluate an exception request and determine if it is allowed.
+ */
+router.post("/ethics/exceptions/evaluate", async (req: Request, res: Response) => {
+  try {
+    const { exception_id, reviewer_id, context } = req.body || {};
+
+    if (!exception_id || !reviewer_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const exception = ETHICAL_EXCEPTIONS.find((e) => e.exception_id === exception_id);
+
+    if (!exception) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "exception_not_found",
+      });
+    }
+
+    // Evaluate exception
+    const evaluation = evaluateException(exception, context || {});
+
+    // Update exception record
+    exception.status = evaluation.approved ? "approved" : "denied";
+    exception.reviewed_by = reviewer_id;
+    exception.review_timestamp = Date.now();
+    exception.evaluation = evaluation;
+
+    return res.status(200).json({
+      status: "ok",
+      exception,
+    });
+
+  } catch (err) {
+    console.error("ethics exceptions evaluate error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ethics/exceptions
+ * Retrieve exception records.
+ */
+router.get("/ethics/exceptions", async (req: Request, res: Response) => {
+  try {
+    const { action_id, actor_id, status, limit } = req.query;
+
+    let results = [...ETHICAL_EXCEPTIONS];
+
+    if (action_id) {
+      results = results.filter((e) => e.action_id === action_id);
+    }
+
+    if (actor_id) {
+      results = results.filter((e) => e.actor_id === actor_id);
+    }
+
+    if (status) {
+      results = results.filter((e) => e.status === status);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ethics exceptions lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Exception Evaluation Logic
+--------------------------------*/
+
+function evaluateException(exception: any, context: any) {
+  const { exception_type, severity, justification } = exception;
+
+  const evaluation: any = {
+    approved: false,
+    reason: "",
+    effects: [],
+  };
+
+  // Emergency overrides
+  if (exception_type === "emergency_override") {
+    if (severity === "high" || context?.life_preserving === true) {
+      evaluation.approved = true;
+      evaluation.reason = "life_preserving_override";
+      evaluation.effects.push("bypass_harm_check");
+      return evaluation;
+    }
+  }
+
+  // Dignity overrides (rare)
+  if (exception_type === "dignity_override") {
+    evaluation.approved = false;
+    evaluation.reason = "dignity_cannot_be_overridden";
+    return evaluation;
+  }
+
+  // Documentation overrides
+  if (exception_type === "documentation_override") {
+    if (justification.length > 20) {
+      evaluation.approved = true;
+      evaluation.reason = "documentation_override_accepted";
+      evaluation.effects.push("bypass_documentation_check");
+      return evaluation;
+    }
+  }
+
+  // Governance overrides
+  if (exception_type === "governance_override") {
+    if (context?.executive_authority === true) {
+      evaluation.approved = true;
+      evaluation.reason = "executive_override";
+      evaluation.effects.push("bypass_governance_constraint");
+      return evaluation;
+    }
+  }
+
+  evaluation.reason = "conditions_not_met";
+  return evaluation;
+}
+
+function cryptoRandomId() {
+  return "ethexc_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
