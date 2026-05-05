@@ -1,0 +1,211 @@
+// beast-system-3-interfaces/src/integrations/adapter.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory adapter registry
+const ADAPTERS: any[] = [];
+
+// In-memory adapter execution log
+const ADAPTER_EXEC_LOG: any[] = [];
+
+/**
+ * POST /integrations/adapter/register
+ * Register an integration adapter with declared capabilities.
+ */
+router.post("/integrations/adapter/register", async (req: Request, res: Response) => {
+  try {
+    const {
+      adapter_id,
+      name,
+      version,
+      supported_events,
+      transform_schema,
+      metadata,
+    } = req.body || {};
+
+    if (!name || !supported_events || !transform_schema) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          name: !name,
+          supported_events: !supported_events,
+          transform_schema: !transform_schema,
+        },
+      });
+    }
+
+    const entry = {
+      adapter_id: adapter_id || cryptoRandomId(),
+      name,
+      version: version || "1.0.0",
+      supported_events,
+      transform_schema,
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    ADAPTERS.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      adapter: entry,
+    });
+
+  } catch (err) {
+    console.error("adapter register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /integrations/adapter/execute
+ * Execute an adapter transformation on an inbound event.
+ */
+router.post("/integrations/adapter/execute", async (req: Request, res: Response) => {
+  try {
+    const { adapter_id, event_type, payload, metadata } = req.body || {};
+
+    if (!adapter_id || !event_type || !payload) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const adapter = ADAPTERS.find((a) => a.adapter_id === adapter_id);
+
+    if (!adapter) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "adapter_not_found",
+      });
+    }
+
+    // Validate event type
+    if (!adapter.supported_events.includes(event_type)) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "event_type_not_supported",
+      });
+    }
+
+    // Execute transformation
+    const transformed = applyTransform(adapter.transform_schema, payload);
+
+    const record = {
+      exec_id: cryptoRandomId(),
+      adapter_id,
+      event_type,
+      input: payload,
+      output: transformed,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    ADAPTER_EXEC_LOG.unshift(record);
+
+    return res.status(200).json({
+      status: "ok",
+      result: record,
+    });
+
+  } catch (err) {
+    console.error("adapter execute error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /integrations/adapter
+ * Retrieve registered adapters or execution logs.
+ */
+router.get("/integrations/adapter", async (req: Request, res: Response) => {
+  try {
+    const { adapter_id, exec_log, limit } = req.query;
+
+    if (exec_log === "true") {
+      let results = [...ADAPTER_EXEC_LOG];
+
+      if (adapter_id) {
+        results = results.filter((e) => e.adapter_id === adapter_id);
+      }
+
+      if (limit) {
+        results = results.slice(0, Number(limit));
+      }
+
+      return res.status(200).json({
+        status: "ok",
+        count: results.length,
+        results,
+      });
+    }
+
+    // Otherwise return adapter registry
+    let results = [...ADAPTERS];
+
+    if (adapter_id) {
+      results = results.filter((a) => a.adapter_id === adapter_id);
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      adapters: results,
+    });
+
+  } catch (err) {
+    console.error("adapter lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Adapter Transformation Logic
+--------------------------------*/
+
+function applyTransform(schema: any, payload: any) {
+  const output: any = {};
+
+  for (const key in schema) {
+    const rule = schema[key];
+
+    // Direct mapping
+    if (typeof rule === "string") {
+      output[key] = payload[rule];
+      continue;
+    }
+
+    // Constant values
+    if (rule.type === "constant") {
+      output[key] = rule.value;
+      continue;
+    }
+
+    // Rename field
+    if (rule.type === "map") {
+      output[key] = payload[rule.from];
+      continue;
+    }
+
+    // Extract nested field
+    if (rule.type === "path") {
+      output[key] = rule.path.split(".").reduce((acc, part) => acc?.[part], payload);
+      continue;
+    }
+
+    // Default fallback
+    output[key] = null;
+  }
+
+  return output;
+}
+
+function cryptoRandomId() {
+  return "adapter_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
