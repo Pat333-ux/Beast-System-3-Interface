@@ -1,0 +1,75 @@
+{
+  "system": "Beast System 3.0",
+  "version": "3.0.0",
+  "metrics": {
+    "uptimeMs": 128513442,
+    "requests": {
+      "total": 18421,
+      "lastMinute": 42,
+      "lastHour": 1184,
+      "errorRatePct": 0.02
+    },
+    "performance": {
+      "latencyMs": {
+        "p50": 18,
+        "p95": 61,
+        "p99": 104
+      },
+      "throughputRps": 74,
+      "taskProcessingRatePerMin": 312
+    },
+    "resourceUsage": {
+      "cpuPct": 14.2,
+      "memoryPct": 41.7,
+      "diskPct": 22.9,
+      "network": {
+        "inKbps": 184,
+        "outKbps": 201
+      }
+    },
+    "events": {
+      "auditBlocksAppended": 1842,
+      "governanceProposalsProcessed": 42,
+      "identityAuthEvents": 317,
+      "integrationHandshakes": 91,
+      "uiSessionsStarted": 128
+    },
+    "queues": {
+      "opsQueueDepth": 3,
+      "opsQueueLatencyMsP95": 87,
+      "auditQueueDepth": 0,
+      "governanceQueueDepth": 1
+    },
+    "subsystems": {
+      "ops": {
+        "tasksProcessed": 1842,
+        "avgTaskDurationMs": 44
+      },
+      "audit": {
+        "appendLatencyMsP95": 19,
+        "integrityChecksPassed": 100
+      },
+      "governance": {
+        "rulesetEvaluations": 512,
+        "proposalLatencyMsP95": 77
+      },
+      "registry": {
+        "recordReadsPerMin": 211,
+        "recordWritesPerMin": 14
+      },
+      "identity": {
+        "authLatencyMsP95": 41,
+        "failedLogins1h": 0
+      },
+      "integrations": {
+        "externalApiLatencyMsP95": 142,
+        "failedHandshakes1h": 0
+      },
+      "ui": {
+        "renderLatencyMsP95": 96,
+        "activeSessions": 7
+      }
+    }
+  },
+  "timestamp": "2026-05-05T11:57:00.000Z"
+}
