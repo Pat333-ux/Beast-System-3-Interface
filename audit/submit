@@ -1,0 +1,125 @@
+// beast-system-3-interfaces/src/audit/submit.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory audit chain (replace with DB or audit-chain.json)
+const AUDIT_CHAIN: any[] = [];
+
+/**
+ * POST /audit/submit
+ * Submit a new audit event into the audit chain.
+ */
+router.post("/audit/submit", async (req: Request, res: Response) => {
+  try {
+    const {
+      event_type,
+      actor_id,
+      target_id,
+      payload,
+      metadata,
+    } = req.body || {};
+
+    if (!event_type || !actor_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          event_type: !event_type,
+          actor_id: !actor_id,
+        },
+      });
+    }
+
+    // 1. Build raw event
+    const event = {
+      event_type,
+      actor_id,
+      target_id: target_id || null,
+      payload: payload || {},
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    // 2. Compute event hash
+    const event_hash = sha256(event);
+
+    // 3. Determine previous hash
+    const previous = AUDIT_CHAIN[0];
+    const previous_hash = previous ? previous.record_hash : null;
+
+    // 4. Build audit record
+    const record = {
+      audit_id: cryptoRandomId(),
+      event,
+      event_hash,
+      previous_hash,
+      record_hash: sha256({ event_hash, previous_hash }),
+      chain_index: AUDIT_CHAIN.length,
+      timestamp: event.timestamp,
+    };
+
+    // 5. Append to chain (append-only)
+    AUDIT_CHAIN.unshift(record);
+
+    return res.status(201).json({
+      status: "submitted",
+      record,
+    });
+
+  } catch (err) {
+    console.error("audit submit error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /audit/submit
+ * Retrieve audit chain entries (same as audit/logs but chain-ordered).
+ */
+router.get("/audit/submit", async (req: Request, res: Response) => {
+  try {
+    const { limit } = req.query;
+
+    let results = [...AUDIT_CHAIN];
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      chain: results,
+    });
+
+  } catch (err) {
+    console.error("audit submit lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Utility
+--------------------------------*/
+
+function sha256(input: any) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(input))
+    .digest("hex");
+}
+
+function cryptoRandomId() {
+  return "audsub_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
