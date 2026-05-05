@@ -1,0 +1,112 @@
+// beast-system-3-interfaces/src/governance/execute-action.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+/**
+ * POST /governance/execute-action
+ * Executes a previously accepted governance action.
+ */
+router.post("/governance/execute-action", async (req: Request, res: Response) => {
+  try {
+    const { action_id, actor_id, metadata } = req.body || {};
+
+    // Basic validation
+    if (!action_id || !actor_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          action_id: !action_id,
+          actor_id: !actor_id,
+        },
+      });
+    }
+
+    // 1. Lookup action from ledger (stub)
+    const action = lookupAction(action_id);
+    if (!action) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "action_not_found",
+      });
+    }
+
+    // 2. Validate actor authority (stub)
+    const authorized = validateAuthority(actor_id, action);
+    if (!authorized) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "insufficient_authority",
+      });
+    }
+
+    // 3. Execute the action (stub)
+    const result = executeKernelAction(action);
+
+    // 4. Update ledger (stub)
+    updateLedger(action_id, {
+      executed_at: Date.now(),
+      executor: actor_id,
+      metadata,
+      result,
+    });
+
+    // 5. Respond
+    return res.status(200).json({
+      status: "executed",
+      action_id,
+      result,
+    });
+
+  } catch (err) {
+    console.error("execute-action error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * Stub: Retrieve action from governance ledger.
+ */
+function lookupAction(action_id: string): any | null {
+  // Replace with real DB/ledger lookup
+  return {
+    action_id,
+    action_type: "policy_invocation",
+    payload: {},
+    context: {},
+  };
+}
+
+/**
+ * Stub: Validate authority to execute the action.
+ */
+function validateAuthority(actor_id: string, action: any): boolean {
+  // Replace with real authority logic
+  return true;
+}
+
+/**
+ * Stub: Execute the action inside the governance kernel.
+ */
+function executeKernelAction(action: any): any {
+  // Replace with real execution logic
+  return {
+    outcome: "success",
+    details: "Action executed successfully",
+  };
+}
+
+/**
+ * Stub: Update ledger with execution result.
+ */
+function updateLedger(action_id: string, update: any): void {
+  // Replace with real persistence logic
+  console.log("Ledger updated:", action_id, update);
+}
+
+export default router;
