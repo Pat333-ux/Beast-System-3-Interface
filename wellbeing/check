@@ -1,0 +1,167 @@
+// beast-system-3-interfaces/src/wellbeing/check.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory check-in log (replace with DB or wellbeing-check-log.json)
+const WELLBEING_CHECK_LOG: any[] = [];
+
+/**
+ * POST /wellbeing/check
+ * Lightweight wellbeing check-in aligned with the 2026 Wellbeing Standard.
+ */
+router.post("/wellbeing/check", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, inputs, metadata } = req.body || {};
+
+    if (!subject_id || !inputs) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          subject_id: !subject_id,
+          inputs: !inputs,
+        },
+      });
+    }
+
+    // 1. Compute domain micro-scores (0–4 scale)
+    const domains = computeDomainScores(inputs);
+
+    // 2. Compute overall wellbeing score (0–100)
+    const overall_score = computeOverallScore(domains);
+
+    // 3. Classify wellbeing status
+    const status = classifyStatus(overall_score);
+
+    // 4. Generate harm-prevention signals (if any)
+    const signals = generateSignals(domains, overall_score);
+
+    // 5. Generate recommended support pathways
+    const pathways = generateSupportPathways(status, signals);
+
+    // 6. Build check-in object
+    const check = {
+      check_id: cryptoRandomId(),
+      subject_id,
+      domains,
+      overall_score,
+      status,
+      signals,
+      pathways,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    WELLBEING_CHECK_LOG.unshift(check);
+
+    return res.status(200).json({
+      status: "ok",
+      check,
+    });
+
+  } catch (err) {
+    console.error("wellbeing check error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /wellbeing/check
+ * Retrieve recent wellbeing check-ins.
+ */
+router.get("/wellbeing/check", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, limit } = req.query;
+
+    let results = [...WELLBEING_CHECK_LOG];
+
+    if (subject_id) {
+      results = results.filter((c) => c.subject_id === subject_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("wellbeing check lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Wellbeing Engine Logic
+--------------------------------*/
+
+function computeDomainScores(inputs: any) {
+  return {
+    housing: normalize(inputs.housing),
+    food: normalize(inputs.food),
+    health: normalize(inputs.health),
+    safety: normalize(inputs.safety),
+    dignity: normalize(inputs.dignity),
+    economic: normalize(inputs.economic),
+    community: normalize(inputs.community),
+  };
+}
+
+function normalize(value: any) {
+  const v = Number(value);
+  if (isNaN(v)) return 0;
+  return Math.max(0, Math.min(4, v));
+}
+
+function computeOverallScore(domains: any) {
+  const values = Object.values(domains);
+  const sum = values.reduce((a: any, b: any) => a + b, 0);
+  return Math.round((sum / (values.length * 4)) * 100);
+}
+
+function classifyStatus(score: number) {
+  if (score >= 85) return "stable";
+  if (score >= 60) return "watch";
+  if (score >= 40) return "concern";
+  return "critical";
+}
+
+function generateSignals(domains: any, score: number) {
+  const signals: string[] = [];
+
+  if (score < 40) signals.push("high_risk");
+  if (domains.safety <= 1) signals.push("safety_alert");
+  if (domains.dignity <= 1) signals.push("dignity_flag");
+  if (domains.health <= 1) signals.push("health_flag");
+
+  return signals;
+}
+
+function generateSupportPathways(status: string, signals: string[]) {
+  const pathways: string[] = [];
+
+  if (status === "critical") pathways.push("immediate_support");
+  if (signals.includes("safety_alert")) pathways.push("safety_intervention");
+  if (signals.includes("dignity_flag")) pathways.push("dignity_protection");
+  if (signals.includes("health_flag")) pathways.push("health_check");
+
+  return pathways;
+}
+
+function cryptoRandomId() {
+  return "wb_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
