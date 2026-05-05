@@ -1,0 +1,192 @@
+// beast-system-3-interfaces/src/ui/prompts.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory prompt registry
+const PROMPT_TEMPLATES: any[] = [];
+
+// In-memory prompt execution log
+const PROMPT_EXEC_LOG: any[] = [];
+
+/**
+ * POST /ui/prompts/register
+ * Register a new prompt template.
+ */
+router.post("/ui/prompts/register", async (req: Request, res: Response) => {
+  try {
+    const { prompt_id, name, template, variables, metadata } = req.body || {};
+
+    if (!name || !template) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          name: !name,
+          template: !template,
+        },
+      });
+    }
+
+    const entry = {
+      prompt_id: prompt_id || cryptoRandomId(),
+      name,
+      template,
+      variables: variables || [],
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    PROMPT_TEMPLATES.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      prompt: entry,
+    });
+
+  } catch (err) {
+    console.error("ui prompts register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /ui/prompts
+ * Retrieve prompt templates.
+ */
+router.get("/ui/prompts", async (req: Request, res: Response) => {
+  try {
+    const { prompt_id, name, limit } = req.query;
+
+    let results = [...PROMPT_TEMPLATES];
+
+    if (prompt_id) {
+      results = results.filter((p) => p.prompt_id === prompt_id);
+    }
+
+    if (name) {
+      results = results.filter((p) => p.name === name);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      prompts: results,
+    });
+
+  } catch (err) {
+    console.error("ui prompts lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /ui/prompts/render
+ * Render a prompt with variable interpolation.
+ */
+router.post("/ui/prompts/render", async (req: Request, res: Response) => {
+  try {
+    const { prompt_id, variables, context } = req.body || {};
+
+    if (!prompt_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_prompt_id",
+      });
+    }
+
+    const prompt = PROMPT_TEMPLATES.find((p) => p.prompt_id === prompt_id);
+
+    if (!prompt) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "prompt_not_found",
+      });
+    }
+
+    const rendered = applyVariables(prompt.template, variables || {}, context || {});
+
+    const record = {
+      exec_id: cryptoRandomId(),
+      prompt_id,
+      rendered,
+      variables,
+      context,
+      timestamp: Date.now(),
+    };
+
+    PROMPT_EXEC_LOG.unshift(record);
+
+    return res.status(200).json({
+      status: "ok",
+      rendered,
+    });
+
+  } catch (err) {
+    console.error("ui prompts render error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /ui/prompts/executions
+ * Retrieve prompt execution logs.
+ */
+router.get("/ui/prompts/executions", async (req: Request, res: Response) => {
+  try {
+    const { prompt_id, limit } = req.query;
+
+    let results = [...PROMPT_EXEC_LOG];
+
+    if (prompt_id) {
+      results = results.filter((e) => e.prompt_id === prompt_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      executions: results,
+    });
+
+  } catch (err) {
+    console.error("ui prompts exec lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Prompt Logic
+--------------------------------*/
+
+function applyVariables(template: string, vars: any, context: any) {
+  let output = template;
+
+  // Replace {{var}} placeholders
+  for (const key in vars) {
+    const value = vars[key];
+    output = output.replace(new RegExp(`{{\\s*${key}\\s*}}`, "g"), value);
+  }
+
+  // Replace {{context.key}} placeholders
+  for (const key in context) {
+    const value = context[key];
+    output = output.replace(new RegExp(`{{\\s*context.${key}\\s*}}`, "g"), value);
+  }
+
+  return output;
+}
+
+function cryptoRandomId() {
+  return "prompt_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
