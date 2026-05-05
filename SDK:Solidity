@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/// @title Beast System 3.0 — Solidity SDK (On‑Chain Facade)
+/// @notice On‑chain mirror of Beast concepts: ops, audit, integrations, UI hooks.
+/// @dev Off‑chain Beast daemons watch these events and call Beast HTTP APIs.
+
+contract BeastSDK {
+    /* -------------------------------------------------------
+       OWNERSHIP / ACCESS
+    ------------------------------------------------------- */
+    address public owner;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "not owner");
+        _;
+    }
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "zero");
+        owner = newOwner;
+    }
+
+    /* -------------------------------------------------------
+       TYPES
+    ------------------------------------------------------- */
+
+    enum Outcome {
+        Unknown,
+        Success,
+        Failure,
+        Partial,
+        Cancelled
+    }
+
+    struct OpDispatch {
+        bytes32 dispatchId;
+        string taskType;
+        address actor;
+        bytes payload; // arbitrary encoded payload
+        uint256 timestamp;
+    }
+
+    struct OpCompletion {
+        bytes32 dispatchId;
+        Outcome outcome;
+        bytes result;
+        string failureReason;
+        uint256 timestamp;
+    }
+
+    struct AuditEvent {
+        bytes32 auditId;
+        string eventType;
+        address actor;
+        address target;
+        bytes payload;
+        uint256 timestamp;
+    }
+
+    /* -------------------------------------------------------
+       STORAGE
+    ------------------------------------------------------- */
+
+    mapping(bytes32 => OpDispatch) public dispatches;
+    mapping(bytes32 => OpCompletion) public completions;
+    mapping(bytes32 => AuditEvent) public audits;
+
+    /* -------------------------------------------------------
+       EVENTS
+    ------------------------------------------------------- */
+
+    event BeastOpDispatched(
+        bytes32 indexed dispatchId,
+        string taskType,
+        address indexed actor,
+        bytes payload,
+        uint256 timestamp
+    );
+
+    event BeastOpCompleted(
+        bytes32 indexed dispatchId,
+        Outcome outcome,
+        bytes result,
+        string failureReason,
+        uint256 timestamp
+    );
+
+    event BeastAuditSubmitted(
+        bytes32 indexed auditId,
+        string eventType,
+        address indexed actor,
+        address indexed target,
+        bytes payload,
+        uint256 timestamp
+    );
+
+    event BeastUiNotificationRequested(
+        bytes32 indexed notificationId,
+        address indexed recipient,
+        string templateName,
+        bytes variables,
+        uint256 timestamp
+    );
+
+    event BeastIntegrationWebhookEvent(
+        bytes32 indexed eventId,
+        string sourceSystem,
+        string eventType,
+        bytes payload,
+        uint256 timestamp
+    );
+
+    /* -------------------------------------------------------
+       HELPERS
+    ------------------------------------------------------- */
+
+    function _now() internal view returns (uint256) {
+        return block.timestamp;
+    }
+
+    function _newId(string memory prefix) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(prefix, msg.sender, block.number, block.timestamp, blockhash(block.number - 1))
+        );
+    }
+
+    /* -------------------------------------------------------
+       OPS FACADE
+    ------------------------------------------------------- */
+
+    /// @notice Mirror of /ops/dispatch
+    function opsDispatch(
+        string calldata taskType,
+        bytes calldata payload
+    ) external returns (bytes32 dispatchId) {
+        dispatchId = _newId("ops.dispatch");
+        OpDispatch storage d = dispatches[dispatchId];
+        d.dispatchId = dispatchId;
+        d.taskType = taskType;
+        d.actor = msg.sender;
+        d.payload = payload;
+        d.timestamp = _now();
+
+        emit BeastOpDispatched(dispatchId, taskType, msg.sender, payload, d.timestamp);
+    }
+
+    /// @notice Mirror of /ops/complete
+    function opsComplete(
+        bytes32 dispatchId,
+        Outcome outcome,
+        bytes calldata result,
+        string calldata failureReason
+    ) external {
+        require(dispatches[dispatchId].dispatchId != 0, "unknown dispatch");
+
+        OpCompletion storage c = completions[dispatchId];
+        c.dispatchId = dispatchId;
+        c.outcome = outcome;
+        c.result = result;
+        c.failureReason = failureReason;
+        c.timestamp = _now();
+
+        emit BeastOpCompleted(dispatchId, outcome, result, failureReason, c.timestamp);
+    }
+
+    /* -------------------------------------------------------
+       AUDIT FACADE
+    ------------------------------------------------------- */
+
+    /// @notice Mirror of /audit/submit
+    function auditSubmit(
+        string calldata eventType,
+        address target,
+        bytes calldata payload
+    ) external returns (bytes32 auditId) {
+        auditId = _newId("audit.submit");
+        AuditEvent storage a = audits[auditId];
+        a.auditId = auditId;
+        a.eventType = eventType;
+        a.actor = msg.sender;
+        a.target = target;
+        a.payload = payload;
+        a.timestamp = _now();
+
+        emit BeastAuditSubmitted(auditId, eventType, msg.sender, target, payload, a.timestamp);
+    }
+
+    /* -------------------------------------------------------
+       UI FACADE (NOTIFICATIONS)
+    ------------------------------------------------------- */
+
+    /// @notice Request a Beast notification to be sent off‑chain.
+    /// Off‑chain daemon listens and calls /ui/notifications/send.
+    function uiNotify(
+        address recipient,
+        string calldata templateName,
+        bytes calldata variables
+    ) external returns (bytes32 notificationId) {
+        notificationId = _newId("ui.notification");
+        emit BeastUiNotificationRequested(
+            notificationId,
+            recipient,
+            templateName,
+            variables,
+            _now()
+        );
+    }
+
+    /* -------------------------------------------------------
+       INTEGRATIONS FACADE
+    ------------------------------------------------------- */
+
+    /// @notice Emit an integration event for off‑chain Beast integrations layer.
+    function integrationsEmit(
+        string calldata sourceSystem,
+        string calldata eventType,
+        bytes calldata payload
+    ) external returns (bytes32 eventId) {
+        eventId = _newId("integrations.event");
+        emit BeastIntegrationWebhookEvent(
+            eventId,
+            sourceSystem,
+            eventType,
+            payload,
+            _now()
+        );
+    }
+
+    /* -------------------------------------------------------
+       VIEW HELPERS
+    ------------------------------------------------------- */
+
+    function getDispatch(bytes32 dispatchId) external view returns (OpDispatch memory) {
+        return dispatches[dispatchId];
+    }
+
+    function getCompletion(bytes32 dispatchId) external view returns (OpCompletion memory) {
+        return completions[dispatchId];
+    }
+
+    function getAudit(bytes32 auditId) external view returns (AuditEvent memory) {
+        return audits[auditId];
+    }
+}
