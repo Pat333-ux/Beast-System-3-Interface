@@ -1,0 +1,173 @@
+// beast-system-3-interfaces/src/registry/anchor.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory anchor registry (replace with DB or registry-anchor.json)
+const REGISTRY_ANCHORS: any[] = [];
+
+/**
+ * GET /registry/anchor
+ * Retrieve anchors with optional filters.
+ */
+router.get("/registry/anchor", async (req: Request, res: Response) => {
+  try {
+    const { anchor_id, entry_id, registry_id, anchor_type, chain_id, limit } = req.query;
+
+    let results = [...REGISTRY_ANCHORS];
+
+    if (anchor_id) {
+      results = results.filter((a) => a.anchor_id === anchor_id);
+    }
+
+    if (entry_id) {
+      results = results.filter((a) => a.entry_id === entry_id);
+    }
+
+    if (registry_id) {
+      results = results.filter((a) => a.registry_id === registry_id);
+    }
+
+    if (anchor_type) {
+      results = results.filter((a) => a.anchor_type === anchor_type);
+    }
+
+    if (chain_id) {
+      results = results.filter((a) => a.chain_id === chain_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      anchors: results,
+    });
+
+  } catch (err) {
+    console.error("registry anchor lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /registry/anchor
+ * Create a new registry anchor.
+ */
+router.post("/registry/anchor", async (req: Request, res: Response) => {
+  try {
+    const {
+      registry_id,
+      entry_id,
+      anchor_type,
+      anchor_value,
+      payload_hash,
+      chain_id,
+      created_by,
+      metadata,
+    } = req.body || {};
+
+    if (!registry_id || !entry_id || !anchor_type || !anchor_value || !payload_hash || !created_by) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          registry_id: !registry_id,
+          entry_id: !entry_id,
+          anchor_type: !anchor_type,
+          anchor_value: !anchor_value,
+          payload_hash: !payload_hash,
+          created_by: !created_by,
+        },
+      });
+    }
+
+    // Generate anchor ID
+    const anchor_id = crypto.randomUUID();
+
+    // Build anchor object
+    const anchor = {
+      anchor_id,
+      registry_id,
+      entry_id,
+      anchor_type,   // blockchain | dao | hash-chain | external-ledger | sovereign-anchor
+      anchor_value,  // tx hash, block hash, DAO anchor ID, etc.
+      payload_hash,
+      chain_id: chain_id || null,
+      created_by,
+      timestamp: new Date().toISOString(),
+      metadata: metadata || {},
+    };
+
+    REGISTRY_ANCHORS.push(anchor);
+
+    return res.status(201).json({
+      status: "anchored",
+      anchor,
+    });
+
+  } catch (err) {
+    console.error("registry anchor write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /registry/anchor/verify
+ * Verify an anchor by recomputing its payload hash.
+ */
+router.post("/registry/anchor/verify", async (req: Request, res: Response) => {
+  try {
+    const { anchor_id, payload } = req.body || {};
+
+    if (!anchor_id || !payload) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const anchor = REGISTRY_ANCHORS.find((a) => a.anchor_id === anchor_id);
+
+    if (!anchor) {
+      return res.status(404).json({
+        status: "invalid",
+        reason: "anchor_not_found",
+      });
+    }
+
+    // Recompute hash
+    const computedHash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(payload))
+      .digest("hex");
+
+    const valid = computedHash === anchor.payload_hash;
+
+    return res.status(200).json({
+      status: valid ? "valid" : "invalid",
+      anchor_id,
+      expected_hash: anchor.payload_hash,
+      computed_hash: computedHash,
+    });
+
+  } catch (err) {
+    console.error("registry anchor verify error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
