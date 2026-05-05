@@ -1,0 +1,138 @@
+// beast-system-3-interfaces/src/governance/vote.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+/**
+ * POST /governance/vote
+ * Submit a vote for a governance proposal or action.
+ */
+router.post("/governance/vote", async (req: Request, res: Response) => {
+  try {
+    const { proposal_id, actor_id, vote, metadata } = req.body || {};
+
+    // Basic validation
+    if (!proposal_id || !actor_id || !vote) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          proposal_id: !proposal_id,
+          actor_id: !actor_id,
+          vote: !vote,
+        },
+      });
+    }
+
+    // 1. Validate vote value
+    const validVotes = ["yes", "no", "abstain"];
+    if (!validVotes.includes(vote)) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "invalid_vote_value",
+        allowed: validVotes,
+      });
+    }
+
+    // 2. Check if proposal exists (stub)
+    const proposal = lookupProposal(proposal_id);
+    if (!proposal) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "proposal_not_found",
+      });
+    }
+
+    // 3. Check if actor already voted (stub)
+    if (hasAlreadyVoted(proposal_id, actor_id)) {
+      return res.status(409).json({
+        status: "rejected",
+        reason: "duplicate_vote",
+      });
+    }
+
+    // 4. Validate actor eligibility (stub)
+    const eligible = validateVotingEligibility(actor_id, proposal);
+    if (!eligible) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "not_eligible_to_vote",
+      });
+    }
+
+    // 5. Record vote (stub)
+    recordVote(proposal_id, actor_id, vote, metadata);
+
+    // 6. Retrieve updated tally (stub)
+    const tally = getVoteTally(proposal_id);
+
+    return res.status(200).json({
+      status: "accepted",
+      proposal_id,
+      vote,
+      tally,
+    });
+
+  } catch (err) {
+    console.error("vote endpoint error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * Stub: Retrieve proposal.
+ */
+function lookupProposal(proposal_id: string): any | null {
+  // Replace with real DB lookup
+  return {
+    proposal_id,
+    title: "Example Governance Proposal",
+    status: "open",
+  };
+}
+
+/**
+ * Stub: Check if actor already voted.
+ */
+function hasAlreadyVoted(proposal_id: string, actor_id: string): boolean {
+  // Replace with real vote tracking
+  return false;
+}
+
+/**
+ * Stub: Validate voting eligibility.
+ */
+function validateVotingEligibility(actor_id: string, proposal: any): boolean {
+  // Replace with real role/permission logic
+  return true;
+}
+
+/**
+ * Stub: Record vote.
+ */
+function recordVote(
+  proposal_id: string,
+  actor_id: string,
+  vote: string,
+  metadata: any
+): void {
+  console.log("Vote recorded:", { proposal_id, actor_id, vote, metadata });
+}
+
+/**
+ * Stub: Get vote tally.
+ */
+function getVoteTally(proposal_id: string): any {
+  // Replace with real tally logic
+  return {
+    yes: 1,
+    no: 0,
+    abstain: 0,
+  };
+}
+
+export default router;
