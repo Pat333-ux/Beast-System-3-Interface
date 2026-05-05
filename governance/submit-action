@@ -1,0 +1,70 @@
+// beast-system-3-interfaces/src/governance/submit-action.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+/**
+ * POST /governance/submit-action
+ * Entry point for all governance actions.
+ */
+router.post("/governance/submit-action", async (req: Request, res: Response) => {
+  try {
+    const {
+      action_type,
+      actor_id,
+      context,
+      payload,
+      metadata,
+    } = req.body || {};
+
+    // Basic validation
+    if (!action_type || !actor_id || !context || !payload) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          action_type: !action_type,
+          actor_id: !actor_id,
+          context: !context,
+          payload: !payload,
+        },
+      });
+    }
+
+    // 1. Identity validation (stub)
+    const identityValid = true; // replace with real identity check
+    if (!identityValid) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "identity_invalid",
+      });
+    }
+
+    // 2. Role & authority resolution (stub)
+    const authority = {
+      level: "executive", // example: "user" | "moderator" | "executive"
+      auto_elevated: true,
+    };
+
+    // 3. Policy loading (stub)
+    const policies = [
+      /* load policies based on action_type, context, actor_id */
+    ];
+
+    // 4. Governance kernel evaluation (stub)
+    const kernelResult = evaluateGovernanceAction({
+      action_type,
+      actor_id,
+      context,
+      payload,
+      metadata,
+      authority,
+      policies,
+    });
+
+    // 5. Ledger entry (stub)
+    const action_id = createGovernanceLedgerEntry({
+      ...kernelResult,
+      action_type,
+      actor_id
