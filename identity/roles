@@ -1,0 +1,122 @@
+// beast-system-3-interfaces/src/identity/roles.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory identity-role assignments (replace with DB or role-assignment.json)
+const IDENTITY_ROLES: any[] = [];
+
+// In-memory role registry (same structure as governance/roles)
+const ROLE_REGISTRY: any = {
+  governing_officer: {
+    authority_level: 100,
+    permissions: ["all"],
+  },
+  executive: {
+    authority_level: 80,
+    permissions: ["policy:invoke", "ops:dispatch", "ethics:review"],
+  },
+  moderator: {
+    authority_level: 50,
+    permissions: ["ops:dispatch", "wellbeing:triage"],
+  },
+  member: {
+    authority_level: 10,
+    permissions: ["submit:requests"],
+  },
+};
+
+/**
+ * GET /identity/roles
+ * Retrieve roles assigned to an identity.
+ */
+router.get("/identity/roles", async (req: Request, res: Response) => {
+  try {
+    const { identity_id } = req.query;
+
+    if (!identity_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_identity_id",
+      });
+    }
+
+    const assignments = IDENTITY_ROLES.filter(
+      (r) => r.identity_id === identity_id
+    );
+
+    const roles = assignments.map((a) => {
+      const roleInfo = ROLE_REGISTRY[a.role] || {};
+      return {
+        role: a.role,
+        assigned_at: a.assigned_at,
+        authority_level: roleInfo.authority_level || 0,
+        permissions: roleInfo.permissions || [],
+      };
+    });
+
+    return res.status(200).json({
+      status: "ok",
+      identity_id,
+      roles,
+    });
+
+  } catch (err) {
+    console.error("identity roles error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /identity/roles
+ * Assign a role to an identity.
+ */
+router.post("/identity/roles", async (req: Request, res: Response) => {
+  try {
+    const { identity_id, role } = req.body || {};
+
+    if (!identity_id || !role) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          identity_id: !identity_id,
+          role: !role,
+        },
+      });
+    }
+
+    if (!ROLE_REGISTRY[role]) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "role_not_found",
+      });
+    }
+
+    const entry = {
+      identity_id,
+      role,
+      assigned_at: Date.now(),
+    };
+
+    IDENTITY_ROLES.push(entry);
+
+    return res.status(201).json({
+      status: "assigned",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("identity roles write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
