@@ -1,0 +1,154 @@
+// beast-system-3-interfaces/src/ops/dispatch.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory dispatch log
+const DISPATCH_LOG: any[] = [];
+
+/**
+ * POST /ops/dispatch
+ * Dispatch an operational task to the correct subsystem or steward.
+ */
+router.post("/ops/dispatch", async (req: Request, res: Response) => {
+  try {
+    const {
+      request_id,
+      subject_id,
+      task_type,
+      priority,
+      triage_level,
+      payload,
+      metadata,
+    } = req.body || {};
+
+    if (!request_id || !task_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          request_id: !request_id,
+          task_type: !task_type,
+        },
+      });
+    }
+
+    // 1. Determine operational route
+    const route = determineRoute(task_type, triage_level);
+
+    // 2. Determine priority level
+    const final_priority = computePriority(priority, triage_level);
+
+    // 3. Build dispatch order
+    const dispatch = {
+      dispatch_id: cryptoRandomId(),
+      request_id,
+      subject_id: subject_id || null,
+      task_type,
+      route,
+      priority: final_priority,
+      triage_level: triage_level || "none",
+      payload: payload || {},
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    DISPATCH_LOG.unshift(dispatch);
+
+    return res.status(200).json({
+      status: "ok",
+      dispatch,
+    });
+
+  } catch (err) {
+    console.error("ops dispatch error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ops/dispatch
+ * Retrieve dispatch records.
+ */
+router.get("/ops/dispatch", async (req: Request, res: Response) => {
+  try {
+    const { request_id, subject_id, limit } = req.query;
+
+    let results = [...DISPATCH_LOG];
+
+    if (request_id) {
+      results = results.filter((d) => d.request_id === request_id);
+    }
+
+    if (subject_id) {
+      results = results.filter((d) => d.subject_id === subject_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ops dispatch lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Dispatch Logic
+--------------------------------*/
+
+function determineRoute(task_type: string, triage_level: string | undefined) {
+  // Wellbeing tasks
+  if (task_type.startsWith("wellbeing")) {
+    if (triage_level === "emergency") return "steward:rapid-response";
+    if (triage_level === "urgent") return "steward:priority";
+    return "wellbeing:queue";
+  }
+
+  // Identity tasks
+  if (task_type.startsWith("identity")) {
+    return "identity:processor";
+  }
+
+  // Governance tasks
+  if (task_type.startsWith("governance")) {
+    return "governance:executor";
+  }
+
+  // Ethics tasks
+  if (task_type.startsWith("ethics")) {
+    return "ethics:reviewer";
+  }
+
+  // Default route
+  return "ops:general";
+}
+
+function computePriority(priority: string | undefined, triage_level: string | undefined) {
+  const base = priority || "normal";
+
+  if (triage_level === "emergency") return "critical";
+  if (triage_level === "urgent") return "high";
+
+  return base;
+}
+
+function cryptoRandomId() {
+  return "opsd_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
