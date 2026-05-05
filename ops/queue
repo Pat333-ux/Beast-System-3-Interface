@@ -1,0 +1,168 @@
+// beast-system-3-interfaces/src/ops/queue.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory operational queue
+const OPS_QUEUE: any[] = [];
+
+/**
+ * POST /ops/queue
+ * Add a task to the operational queue.
+ */
+router.post("/ops/queue", async (req: Request, res: Response) => {
+  try {
+    const {
+      dispatch_id,
+      task_type,
+      priority,
+      triage_level,
+      payload,
+      metadata,
+    } = req.body || {};
+
+    if (!dispatch_id || !task_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          dispatch_id: !dispatch_id,
+          task_type: !task_type,
+        },
+      });
+    }
+
+    const entry = {
+      queue_id: cryptoRandomId(),
+      dispatch_id,
+      task_type,
+      priority: priority || "normal",
+      triage_level: triage_level || "none",
+      payload: payload || {},
+      metadata: metadata || {},
+      enqueued_at: Date.now(),
+    };
+
+    OPS_QUEUE.push(entry);
+
+    // Sort queue by triage + priority + timestamp
+    sortQueue();
+
+    return res.status(201).json({
+      status: "queued",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("ops queue write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ops/queue
+ * Retrieve queued tasks with optional filters.
+ */
+router.get("/ops/queue", async (req: Request, res: Response) => {
+  try {
+    const { task_type, priority, triage_level, limit } = req.query;
+
+    let results = [...OPS_QUEUE];
+
+    if (task_type) {
+      results = results.filter((q) => q.task_type === task_type);
+    }
+
+    if (priority) {
+      results = results.filter((q) => q.priority === priority);
+    }
+
+    if (triage_level) {
+      results = results.filter((q) => q.triage_level === triage_level);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ops queue lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /ops/queue/next
+ * Pop the next task from the queue (used by stewards + automated agents).
+ */
+router.post("/ops/queue/next", async (req: Request, res: Response) => {
+  try {
+    if (OPS_QUEUE.length === 0) {
+      return res.status(404).json({
+        status: "empty",
+        reason: "no_tasks_available",
+      });
+    }
+
+    // Ensure queue is sorted
+    sortQueue();
+
+    const next = OPS_QUEUE.shift();
+
+    return res.status(200).json({
+      status: "ok",
+      next,
+    });
+
+  } catch (err) {
+    console.error("ops queue next error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Queue Logic
+--------------------------------*/
+
+function sortQueue() {
+  OPS_QUEUE.sort((a, b) => {
+    // 1. Triage level ordering
+    const triageRank = { emergency: 0, urgent: 1, none: 2 };
+    const triageA = triageRank[a.triage_level] ?? 3;
+    const triageB = triageRank[b.triage_level] ?? 3;
+
+    if (triageA !== triageB) return triageA - triageB;
+
+    // 2. Priority ordering
+    const priorityRank = { critical: 0, high: 1, normal: 2, low: 3 };
+    const prA = priorityRank[a.priority] ?? 4;
+    const prB = priorityRank[b.priority] ?? 4;
+
+    if (prA !== prB) return prA - prB;
+
+    // 3. FIFO fallback
+    return a.enqueued_at - b.enqueued_at;
+  });
+}
+
+function cryptoRandomId() {
+  return "opsq_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
