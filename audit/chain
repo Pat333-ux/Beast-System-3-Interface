@@ -1,0 +1,83 @@
+// beast-system-3-interfaces/src/audit/chain.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory audit chain (replace with DB or audit-chain.json)
+const AUDIT_CHAIN: any[] = [];
+
+/**
+ * GET /audit/chain
+ * Retrieve the full audit chain or filtered segments.
+ */
+router.get("/audit/chain", async (req: Request, res: Response) => {
+  try {
+    const { from_index, to_index, limit } = req.query;
+
+    let results = [...AUDIT_CHAIN];
+
+    // Filter by chain index range
+    if (from_index) {
+      const start = Number(from_index);
+      results = results.filter((r) => r.chain_index >= start);
+    }
+
+    if (to_index) {
+      const end = Number(to_index);
+      results = results.filter((r) => r.chain_index <= end);
+    }
+
+    // Limit results
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      chain: results,
+    });
+
+  } catch (err) {
+    console.error("audit chain lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /audit/chain
+ * Directly append a fully-formed audit record (used by internal systems only).
+ */
+router.post("/audit/chain", async (req: Request, res: Response) => {
+  try {
+    const record = req.body;
+
+    if (!record || !record.record_hash || !record.event_hash) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "invalid_audit_record",
+      });
+    }
+
+    // Append-only
+    AUDIT_CHAIN.unshift(record);
+
+    return res.status(201).json({
+      status: "appended",
+      record,
+    });
+
+  } catch (err) {
+    console.error("audit chain append error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
