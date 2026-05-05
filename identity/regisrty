@@ -1,0 +1,91 @@
+// beast-system-3-interfaces/src/governance/audit.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory audit log (replace with DB or chain-of-custody system)
+const AUDIT_LOG: any[] = [];
+
+/**
+ * GET /governance/audit
+ * Retrieve audit log entries with optional filters.
+ */
+router.get("/governance/audit", async (req: Request, res: Response) => {
+  try {
+    const { actor_id, event_type, limit } = req.query;
+
+    let entries = [...AUDIT_LOG];
+
+    // Optional filters
+    if (actor_id) {
+      entries = entries.filter((e) => e.actor_id === actor_id);
+    }
+
+    if (event_type) {
+      entries = entries.filter((e) => e.event_type === event_type);
+    }
+
+    if (limit) {
+      entries = entries.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: entries.length,
+      entries,
+    });
+
+  } catch (err) {
+    console.error("audit endpoint error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /governance/audit
+ * Record an audit event.
+ */
+router.post("/governance/audit", async (req: Request, res: Response) => {
+  try {
+    const { actor_id, event_type, target, metadata } = req.body || {};
+
+    if (!actor_id || !event_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          actor_id: !actor_id,
+          event_type: !event_type,
+        },
+      });
+    }
+
+    const entry = {
+      actor_id,
+      event_type, // e.g. "read", "write", "modify", "execute", "access"
+      target: target || null,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    AUDIT_LOG.unshift(entry);
+
+    return res.status(201).json({
+      status: "recorded",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("audit write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
