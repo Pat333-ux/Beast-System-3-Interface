@@ -1,0 +1,403 @@
+# Beast System 3.0 — Official Python SDK (Single File)
+
+import json
+import urllib.parse
+import urllib.request
+
+
+class Beast:
+    def __init__(self, base_url="http://localhost:3000", token=None, api_key=None):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.api_key = api_key
+
+    # -------------------------------------------------------
+    # INTERNAL REQUEST WRAPPER
+    # -------------------------------------------------------
+    def _request(self, path, method="GET", body=None, query=None):
+        url = f"{self.base_url}{path}"
+
+        if query:
+            qs = urllib.parse.urlencode({k: v for k, v in query.items() if v is not None})
+            url = f"{url}?{qs}"
+
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+
+        try:
+            with urllib.request.urlopen(req) as res:
+                raw = res.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            raw = e.read().decode("utf-8")
+            raise Exception(raw)
+
+    # -------------------------------------------------------
+    # OPS ENGINE
+    # -------------------------------------------------------
+    class Ops:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def dispatch(self, task_type, actor_id, payload=None):
+            return self.parent._request(
+                "/ops/dispatch",
+                "POST",
+                {"task_type": task_type, "actor_id": actor_id, "payload": payload or {}},
+            )
+
+        def status(self, dispatch_id):
+            return self.parent._request("/ops/status", "GET", None, {"dispatch_id": dispatch_id})
+
+        def queue_next(self):
+            return self.parent._request("/ops/queue/next", "POST")
+
+        def complete(self, dispatch_id, outcome, result=None, failure_reason=None):
+            return self.parent._request(
+                "/ops/complete",
+                "POST",
+                {
+                    "dispatch_id": dispatch_id,
+                    "outcome": outcome,
+                    "result": result or {},
+                    "failure_reason": failure_reason,
+                },
+            )
+
+    # -------------------------------------------------------
+    # AUDIT ENGINE
+    # -------------------------------------------------------
+    class Audit:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def submit(self, event_type, actor_id, target_id=None, payload=None, metadata=None):
+            return self.parent._request(
+                "/audit/submit",
+                "POST",
+                {
+                    "event_type": event_type,
+                    "actor_id": actor_id,
+                    "target_id": target_id,
+                    "payload": payload or {},
+                    "metadata": metadata or {},
+                },
+            )
+
+        def logs(self, **filters):
+            return self.parent._request("/audit/logs", "GET", None, filters)
+
+        def chain(self, **filters):
+            return self.parent._request("/audit/chain", "GET", None, filters)
+
+        def attest(self, **params):
+            return self.parent._request("/audit/attest", "POST", params)
+
+        def verify(self, attestation_id):
+            return self.parent._request(
+                "/audit/attest/verify", "POST", {"attestation_id": attestation_id}
+            )
+
+    # -------------------------------------------------------
+    # UI: FORMS
+    # -------------------------------------------------------
+    class Forms:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, name, fields, metadata=None):
+            return self.parent._request(
+                "/ui/forms/register",
+                "POST",
+                {"name": name, "fields": fields, "metadata": metadata or {}},
+            )
+
+        def get(self, **filters):
+            return self.parent._request("/ui/forms", "GET", None, filters)
+
+        def render(self, form_id):
+            return self.parent._request("/ui/forms/render", "POST", {"form_id": form_id})
+
+        def submit(self, form_id, data, metadata=None):
+            return self.parent._request(
+                "/ui/forms/submit",
+                "POST",
+                {"form_id": form_id, "data": data, "metadata": metadata or {}},
+            )
+
+        def submissions(self, **filters):
+            return self.parent._request("/ui/forms/submissions", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # UI: PROMPTS
+    # -------------------------------------------------------
+    class Prompts:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, name, template, variables=None, metadata=None):
+            return self.parent._request(
+                "/ui/prompts/register",
+                "POST",
+                {
+                    "name": name,
+                    "template": template,
+                    "variables": variables or [],
+                    "metadata": metadata or {},
+                },
+            )
+
+        def get(self, **filters):
+            return self.parent._request("/ui/prompts", "GET", None, filters)
+
+        def render(self, prompt_id, variables=None, context=None):
+            return self.parent._request(
+                "/ui/prompts/render",
+                "POST",
+                {
+                    "prompt_id": prompt_id,
+                    "variables": variables or {},
+                    "context": context or {},
+                },
+            )
+
+        def executions(self, **filters):
+            return self.parent._request("/ui/prompts/executions", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # UI: NOTIFICATIONS
+    # -------------------------------------------------------
+    class Notifications:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, name, template, channels, variables=None, metadata=None):
+            return self.parent._request(
+                "/ui/notifications/register",
+                "POST",
+                {
+                    "name": name,
+                    "template": template,
+                    "channels": channels,
+                    "variables": variables or [],
+                    "metadata": metadata or {},
+                },
+            )
+
+        def send(self, template_id, recipient_id, variables=None, priority="normal"):
+            return self.parent._request(
+                "/ui/notifications/send",
+                "POST",
+                {
+                    "template_id": template_id,
+                    "recipient_id": recipient_id,
+                    "variables": variables or {},
+                    "priority": priority,
+                },
+            )
+
+        def read(self, notification_id):
+            return self.parent._request(
+                "/ui/notifications/read", "POST", {"notification_id": notification_id}
+            )
+
+        def list(self, **filters):
+            return self.parent._request("/ui/notifications", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # INTEGRATIONS: WEBHOOK
+    # -------------------------------------------------------
+    class Webhook:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, url, secret, event_types, metadata=None):
+            return self.parent._request(
+                "/integrations/webhook/register",
+                "POST",
+                {
+                    "url": url,
+                    "secret": secret,
+                    "event_types": event_types,
+                    "metadata": metadata or {},
+                },
+            )
+
+        def events(self, **filters):
+            return self.parent._request("/integrations/webhook", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # INTEGRATIONS: ADAPTER
+    # -------------------------------------------------------
+    class Adapter:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, name, supported_events, transform_schema, metadata=None):
+            return self.parent._request(
+                "/integrations/adapter/register",
+                "POST",
+                {
+                    "name": name,
+                    "supported_events": supported_events,
+                    "transform_schema": transform_schema,
+                    "metadata": metadata or {},
+                },
+            )
+
+        def execute(self, adapter_id, event_type, payload, metadata=None):
+            return self.parent._request(
+                "/integrations/adapter/execute",
+                "POST",
+                {
+                    "adapter_id": adapter_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                    "metadata": metadata or {},
+                },
+            )
+
+        def list(self, **filters):
+            return self.parent._request("/integrations/adapter", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # INTEGRATIONS: BRIDGE
+    # -------------------------------------------------------
+    class Bridge:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(
+            self,
+            name,
+            source_system,
+            target_system,
+            supported_operations,
+            sync_schema=None,
+            metadata=None,
+        ):
+            return self.parent._request(
+                "/integrations/bridge/register",
+                "POST",
+                {
+                  "name": name,
+                  "source_system": source_system,
+                  "target_system": target_system,
+                  "supported_operations": supported_operations,
+                  "sync_schema": sync_schema or {},
+                  "metadata": metadata or {},
+                },
+            )
+
+        def sync(self, bridge_id, operation, payload, metadata=None):
+            return self.parent._request(
+                "/integrations/bridge/sync",
+                "POST",
+                {
+                    "bridge_id": bridge_id,
+                    "operation": operation,
+                    "payload": payload,
+                    "metadata": metadata or {},
+                },
+            )
+
+        def list(self, **filters):
+            return self.parent._request("/integrations/bridge", "GET", None, filters)
+
+    # -------------------------------------------------------
+    # INTEGRATIONS: OAUTH
+    # -------------------------------------------------------
+    class OAuth:
+        def __init__(self, parent):
+            self.parent = parent
+
+        def register(self, client_name, redirect_uris, scopes=None, metadata=None):
+            return self.parent._request(
+                "/integrations/oauth/register",
+                "POST",
+                {
+                    "client_name": client_name,
+                    "redirect_uris": redirect_uris,
+                    "scopes": scopes or [],
+                    "metadata": metadata or {},
+                },
+            )
+
+        def authorize(self, client_id, redirect_uri, user_id, scope=""):
+            return self.parent._request(
+                "/integrations/oauth/authorize",
+                "POST",
+                {
+                    "client_id": client_id,
+                    "redirect_uri": redirect_uri,
+                    "user_id": user_id,
+                    "scope": scope,
+                },
+            )
+
+        def token(self, client_id, client_secret, code):
+            return self.parent._request(
+                "/integrations/oauth/token",
+                "POST",
+                {
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                },
+            )
+
+        def introspect(self, access_token):
+            return self.parent._request(
+                "/integrations/oauth/introspect",
+                "POST",
+                {"access_token": access_token},
+            )
+
+    # -------------------------------------------------------
+    # INITIALIZE SUBMODULES
+    # -------------------------------------------------------
+    @property
+    def ops(self):
+        return Beast.Ops(self)
+
+    @property
+    def audit(self):
+        return Beast.Audit(self)
+
+    @property
+    def forms(self):
+        return Beast.Forms(self)
+
+    @property
+    def prompts(self):
+        return Beast.Prompts(self)
+
+    @property
+    def notifications(self):
+        return Beast.Notifications(self)
+
+    @property
+    def webhook(self):
+        return Beast.Webhook(self)
+
+    @property
+    def adapter(self):
+        return Beast.Adapter(self)
+
+    @property
+    def bridge(self):
+        return Beast.Bridge(self)
+
+    @property
+    def oauth(self):
+        return Beast.OAuth(self)
