@@ -1,0 +1,534 @@
+#!/usr/bin/env node
+
+// beastctl — Beast System 3.0 CLI (single-file implementation)
+
+import { Command } from "commander";
+import axios, { Method } from "axios";
+import fs from "fs";
+import path from "path";
+
+const program = new Command();
+const HOME = process.env.HOME || process.env.USERPROFILE || ".";
+const CONFIG_DIR = path.join(HOME, ".beastctl");
+const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+
+/* -------------------------------------------------------
+   CONFIG + API HELPERS
+------------------------------------------------------- */
+
+type BeastctlConfig = {
+  base_url?: string;
+  token?: string;
+  api_key?: string;
+  [key: string]: any;
+};
+
+function loadConfig(): BeastctlConfig {
+  if (!fs.existsSync(CONFIG_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveConfig(cfg: BeastctlConfig) {
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
+}
+
+async function api(
+  path: string,
+  method: Method = "GET",
+  data: any = null,
+  query: Record<string, any> = {}
+) {
+  const config = loadConfig();
+  const base = config.base_url || "http://localhost:3000";
+
+  const url = new URL(path, base);
+  Object.entries(query).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") {
+      url.searchParams.set(k, String(v));
+    }
+  });
+
+  const headers: Record<string, string> = {};
+  if (config.token) headers["Authorization"] = `Bearer ${config.token}`;
+  if (config.api_key) headers["X-API-Key"] = config.api_key;
+
+  const res = await axios({
+    url: url.toString(),
+    method,
+    data,
+    headers,
+  });
+
+  return res.data;
+}
+
+function printOutput(data: any, format: string | undefined) {
+  switch (format) {
+    case "raw":
+      process.stdout.write(typeof data === "string" ? data : JSON.stringify(data));
+      break;
+    case "yaml":
+      // lightweight inline YAML-ish (no external deps)
+      console.log(JSON.stringify(data, null, 2)); // swap with real YAML if you like
+      break;
+    case "pretty":
+      console.log(JSON.stringify(data, null, 2));
+      break;
+    case "json":
+    default:
+      console.log(JSON.stringify(data, null, 2));
+      break;
+  }
+}
+
+/* -------------------------------------------------------
+   GLOBAL OPTIONS
+------------------------------------------------------- */
+
+program
+  .name("beastctl")
+  .description("Beast System 3.0 — Sovereign Governance Engine CLI")
+  .version("0.1.0")
+  .option("--format <format>", "output format: json|pretty|raw|yaml", "pretty");
+
+/* -------------------------------------------------------
+   SYSTEM COMMANDS
+------------------------------------------------------- */
+
+program
+  .command("system:config:set")
+  .description("Set base URL or auth tokens")
+  .option("--base-url <url>", "Base URL of Beast System API")
+  .option("--token <token>", "Bearer token")
+  .option("--api-key <key>", "API key")
+  .action((opts) => {
+    const cfg = loadConfig();
+    if (opts.baseUrl) cfg.base_url = opts.baseUrl;
+    if (opts.token) cfg.token = opts.token;
+    if (opts.apiKey) cfg.api_key = opts.apiKey;
+    saveConfig(cfg);
+    console.log("Configuration updated.");
+  });
+
+program
+  .command("system:config:get")
+  .description("Show current configuration")
+  .action(() => {
+    const cfg = loadConfig();
+    console.log(JSON.stringify(cfg, null, 2));
+  });
+
+/* -------------------------------------------------------
+   OPS COMMANDS
+------------------------------------------------------- */
+
+program
+  .command("ops:dispatch")
+  .description("Dispatch an operational task")
+  .requiredOption("--task <task_type>", "Task type")
+  .requiredOption("--actor <actor_id>", "Actor ID")
+  .option("--payload <json>", "JSON payload")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const payload = opts.payload ? JSON.parse(opts.payload) : {};
+    const body = {
+      task_type: opts.task,
+      actor_id: opts.actor,
+      payload,
+    };
+    const res = await api("/ops/dispatch", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("ops:status")
+  .description("Get status for a dispatch")
+  .requiredOption("--dispatch-id <id>", "Dispatch ID")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const res = await api("/ops/status", "GET", null, {
+      dispatch_id: opts.dispatchId,
+    });
+    printOutput(res, format);
+  });
+
+program
+  .command("ops:queue:next")
+  .description("Pop next task from queue")
+  .action(async () => {
+    const format = program.opts().format;
+    const res = await api("/ops/queue/next", "POST", {});
+    printOutput(res, format);
+  });
+
+program
+  .command("ops:complete")
+  .description("Mark a task as completed/failed")
+  .requiredOption("--dispatch-id <id>", "Dispatch ID")
+  .requiredOption("--outcome <outcome>", "success|failure|partial|cancelled")
+  .option("--result <json>", "Result JSON")
+  .option("--failure-reason <reason>", "Failure reason")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const result = opts.result ? JSON.parse(opts.result) : {};
+    const body = {
+      dispatch_id: opts.dispatchId,
+      outcome: opts.outcome,
+      result,
+      failure_reason: opts.failureReason,
+    };
+    const res = await api("/ops/complete", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   AUDIT COMMANDS
+------------------------------------------------------- */
+
+program
+  .command("audit:submit")
+  .description("Submit an audit event")
+  .requiredOption("--event-type <type>", "Event type")
+  .requiredOption("--actor-id <id>", "Actor ID")
+  .option("--target-id <id>", "Target ID")
+  .option("--payload <json>", "Payload JSON")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const payload = opts.payload ? JSON.parse(opts.payload) : {};
+    const body = {
+      event_type: opts.eventType,
+      actor_id: opts.actorId,
+      target_id: opts.targetId,
+      payload,
+    };
+    const res = await api("/audit/submit", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("audit:logs")
+  .description("Retrieve audit logs")
+  .option("--event-type <type>", "Event type")
+  .option("--actor-id <id>", "Actor ID")
+  .option("--chain-id <id>", "Chain ID")
+  .option("--from <ts>", "From timestamp")
+  .option("--to <ts>", "To timestamp")
+  .option("--limit <n>", "Limit")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const res = await api("/audit/logs", "GET", null, {
+      event_type: opts.eventType,
+      actor_id: opts.actorId,
+      chain_id: opts.chainId,
+      from: opts.from,
+      to: opts.to,
+      limit: opts.limit,
+    });
+    printOutput(res, format);
+  });
+
+program
+  .command("audit:chain")
+  .description("Retrieve audit chain")
+  .option("--from-index <n>", "From chain index")
+  .option("--to-index <n>", "To chain index")
+  .option("--limit <n>", "Limit")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const res = await api("/audit/chain", "GET", null, {
+      from_index: opts.fromIndex,
+      to_index: opts.toIndex,
+      limit: opts.limit,
+    });
+    printOutput(res, format);
+  });
+
+program
+  .command("audit:attest")
+  .description("Create an attestation for audit record or range")
+  .option("--audit-id <id>", "Audit ID")
+  .option("--from-index <n>", "From chain index")
+  .option("--to-index <n>", "To chain index")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body: any = {};
+    if (opts.auditId) body.audit_id = opts.auditId;
+    if (opts.fromIndex !== undefined) body.from_index = Number(opts.fromIndex);
+    if (opts.toIndex !== undefined) body.to_index = Number(opts.toIndex);
+    const res = await api("/audit/attest", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("audit:attest:verify")
+  .description("Verify an attestation")
+  .requiredOption("--attestation-id <id>", "Attestation ID")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = { attestation_id: opts.attestationId };
+    const res = await api("/audit/attest/verify", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   UI: FORMS
+------------------------------------------------------- */
+
+program
+  .command("ui:forms:render")
+  .description("Render a form schema")
+  .requiredOption("--form-id <id>", "Form ID")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = { form_id: opts.formId };
+    const res = await api("/ui/forms/render", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("ui:forms:submit")
+  .description("Submit a form")
+  .requiredOption("--form-id <id>", "Form ID")
+  .requiredOption("--data <json>", "Form data JSON")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const data = JSON.parse(opts.data);
+    const body = { form_id: opts.formId, data };
+    const res = await api("/ui/forms/submit", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   UI: PROMPTS
+------------------------------------------------------- */
+
+program
+  .command("ui:prompts:render")
+  .description("Render a prompt")
+  .requiredOption("--prompt-id <id>", "Prompt ID")
+  .option("--vars <json>", "Variables JSON")
+  .option("--context <json>", "Context JSON")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const variables = opts.vars ? JSON.parse(opts.vars) : {};
+    const context = opts.context ? JSON.parse(opts.context) : {};
+    const body = { prompt_id: opts.promptId, variables, context };
+    const res = await api("/ui/prompts/render", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   UI: NOTIFICATIONS
+------------------------------------------------------- */
+
+program
+  .command("ui:notif:send")
+  .description("Send a notification")
+  .requiredOption("--template-id <id>", "Template ID")
+  .requiredOption("--recipient-id <id>", "Recipient ID")
+  .option("--vars <json>", "Variables JSON")
+  .option("--priority <level>", "Priority", "normal")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const variables = opts.vars ? JSON.parse(opts.vars) : {};
+    const body = {
+      template_id: opts.templateId,
+      recipient_id: opts.recipientId,
+      variables,
+      priority: opts.priority,
+    };
+    const res = await api("/ui/notifications/send", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("ui:notif:list")
+  .description("List notifications")
+  .option("--recipient-id <id>", "Recipient ID")
+  .option("--unread", "Only unread")
+  .option("--limit <n>", "Limit")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const res = await api("/ui/notifications", "GET", null, {
+      recipient_id: opts.recipientId,
+      unread: opts.unread ? "true" : undefined,
+      limit: opts.limit,
+    });
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   INTEGRATIONS: WEBHOOK
+------------------------------------------------------- */
+
+program
+  .command("integrations:webhook:register")
+  .description("Register a webhook")
+  .requiredOption("--url <url>", "Webhook URL")
+  .requiredOption("--secret <secret>", "Webhook secret")
+  .requiredOption("--events <csv>", "Comma-separated event types")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = {
+      url: opts.url,
+      secret: opts.secret,
+      event_types: String(opts.events).split(",").map((s: string) => s.trim()),
+    };
+    const res = await api("/integrations/webhook/register", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("integrations:webhook:events")
+  .description("List webhook events")
+  .option("--webhook-id <id>", "Webhook ID")
+  .option("--event-type <type>", "Event type")
+  .option("--limit <n>", "Limit")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const res = await api("/integrations/webhook", "GET", null, {
+      webhook_id: opts.webhookId,
+      event_type: opts.eventType,
+      limit: opts.limit,
+    });
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   INTEGRATIONS: ADAPTER
+------------------------------------------------------- */
+
+program
+  .command("integrations:adapter:execute")
+  .description("Execute an adapter transformation")
+  .requiredOption("--adapter-id <id>", "Adapter ID")
+  .requiredOption("--event-type <type>", "Event type")
+  .requiredOption("--payload <json>", "Payload JSON")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const payload = JSON.parse(opts.payload);
+    const body = {
+      adapter_id: opts.adapterId,
+      event_type: opts.eventType,
+      payload,
+    };
+    const res = await api("/integrations/adapter/execute", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   INTEGRATIONS: BRIDGE
+------------------------------------------------------- */
+
+program
+  .command("integrations:bridge:sync")
+  .description("Execute a bridge sync operation")
+  .requiredOption("--bridge-id <id>", "Bridge ID")
+  .requiredOption("--operation <op>", "Operation")
+  .requiredOption("--payload <json>", "Payload JSON")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const payload = JSON.parse(opts.payload);
+    const body = {
+      bridge_id: opts.bridgeId,
+      operation: opts.operation,
+      payload,
+    };
+    const res = await api("/integrations/bridge/sync", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   INTEGRATIONS: OAUTH
+------------------------------------------------------- */
+
+program
+  .command("integrations:oauth:register")
+  .description("Register an OAuth client")
+  .requiredOption("--client-name <name>", "Client name")
+  .requiredOption("--redirect-uris <csv>", "Comma-separated redirect URIs")
+  .option("--scopes <csv>", "Comma-separated scopes")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = {
+      client_name: opts.clientName,
+      redirect_uris: String(opts.redirectUris).split(",").map((s: string) => s.trim()),
+      scopes: opts.scopes
+        ? String(opts.scopes).split(",").map((s: string) => s.trim())
+        : [],
+    };
+    const res = await api("/integrations/oauth/register", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("integrations:oauth:authorize")
+  .description("Create an authorization code")
+  .requiredOption("--client-id <id>", "Client ID")
+  .requiredOption("--redirect-uri <uri>", "Redirect URI")
+  .requiredOption("--user-id <id>", "User ID")
+  .option("--scope <scope>", "Scope")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = {
+      client_id: opts.clientId,
+      redirect_uri: opts.redirectUri,
+      user_id: opts.userId,
+      scope: opts.scope,
+    };
+    const res = await api("/integrations/oauth/authorize", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("integrations:oauth:token")
+  .description("Exchange code for token")
+  .requiredOption("--client-id <id>", "Client ID")
+  .requiredOption("--client-secret <secret>", "Client secret")
+  .requiredOption("--code <code>", "Authorization code")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = {
+      client_id: opts.clientId,
+      client_secret: opts.clientSecret,
+      code: opts.code,
+      grant_type: "authorization_code",
+    };
+    const res = await api("/integrations/oauth/token", "POST", body);
+    printOutput(res, format);
+  });
+
+program
+  .command("integrations:oauth:introspect")
+  .description("Introspect an access token")
+  .requiredOption("--access-token <token>", "Access token")
+  .action(async (opts) => {
+    const format = program.opts().format;
+    const body = { access_token: opts.accessToken };
+    const res = await api("/integrations/oauth/introspect", "POST", body);
+    printOutput(res, format);
+  });
+
+/* -------------------------------------------------------
+   BANNER
+------------------------------------------------------- */
+
+if (process.argv.length <= 2) {
+  console.log(`
+███   ███ ███████  ███████ ███████ ███████ ████████ ████████ ██
+███   ███ ██       ██         ██   ██         ██       ██    ██
+█████████ █████    ███████    ██   ███████    ██       ██    ██
+███   ███ ██            ██    ██        ██    ██       ██    ██
+███   ███ ███████  ███████    ██   ███████    ██       ██    ███████
+Beast System 3.0 — Sovereign Governance Engine CLI
+`);
+}
+
+program.parse(process.argv);
