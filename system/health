@@ -1,0 +1,91 @@
+{
+  "system": "Beast System 3.0",
+  "version": "3.0.0",
+  "status": "OPERATIONAL",
+  "uptimeMs": 128445233,
+  "components": {
+    "ops": "healthy",
+    "audit": "healthy",
+    "ui": "healthy",
+    "integrations": "healthy",
+    "governance": "healthy",
+    "registry": "healthy",
+    "identity": "healthy"
+  },
+  "deepHealth": {
+    "ops": {
+      "queueLatencyMsP50": 23,
+      "queueLatencyMsP95": 87,
+      "activeWorkers": 12,
+      "scheduledTasks": 41,
+      "lastTaskErrorAt": null,
+      "status": "healthy"
+    },
+    "audit": {
+      "chainHeight": 1842,
+      "lastBlockHash": "0x9f3a2b7c4e1d8a90",
+      "integrityCheck": "pass",
+      "lastTamperCheckAt": "2026-05-05T11:50:00.000Z",
+      "appendLatencyMsP95": 19,
+      "status": "healthy"
+    },
+    "ui": {
+      "renderLatencyMsP50": 32,
+      "renderLatencyMsP95": 96,
+      "errorRate1m": 0.0,
+      "activeSessions": 7,
+      "status": "healthy"
+    },
+    "integrations": {
+      "cityApi": {
+        "handshake": "ok",
+        "latencyMsP95": 142,
+        "errorRate1m": 0.01
+      },
+      "payments": {
+        "handshake": "ok",
+        "latencyMsP95": 211,
+        "errorRate1m": 0.0
+      },
+      "messaging": {
+        "handshake": "ok",
+        "latencyMsP95": 64,
+        "errorRate1m": 0.0
+      },
+      "status": "healthy"
+    },
+    "governance": {
+      "activeRulesets": 5,
+      "pendingProposals": 2,
+      "lastProposalId": "PROP-2026-0042",
+      "lastProposalAppliedAt": "2026-05-05T10:32:11.000Z",
+      "overrideActive": false,
+      "status": "healthy"
+    },
+    "registry": {
+      "identityRecords": 1284,
+      "assetRecords": 392,
+      "civicRecords": 211,
+      "replicationLagMs": 14,
+      "indexStatus": "green",
+      "status": "healthy"
+    },
+    "identity": {
+      "authLatencyMsP95": 41,
+      "failedLogins1m": 0,
+      "walletBindings": 317,
+      "keyRotationDueAt": "2026-05-12T00:00:00.000Z",
+      "status": "healthy"
+    },
+    "meta": {
+      "errorHistory": [],
+      "lastOverride": null,
+      "internalTimers": {
+        "healthCheckIntervalMs": 5000,
+        "auditSweepIntervalMs": 60000,
+        "governanceSyncIntervalMs": 15000
+      }
+    }
+  },
+  "checkedAt": "2026-05-05T11:55:00.000Z"
+}
