@@ -1,0 +1,122 @@
+// beast-system-3-interfaces/src/ops/status.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory status registry
+const OPS_STATUS: any[] = [];
+
+/**
+ * POST /ops/status
+ * Update or register the status of an operational task.
+ */
+router.post("/ops/status", async (req: Request, res: Response) => {
+  try {
+    const {
+      dispatch_id,
+      status,
+      stage,
+      assigned_to,
+      escalation,
+      metadata,
+    } = req.body || {};
+
+    if (!dispatch_id || !status) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          dispatch_id: !dispatch_id,
+          status: !status,
+        },
+      });
+    }
+
+    // Check if status already exists
+    const existing = OPS_STATUS.find((s) => s.dispatch_id === dispatch_id);
+
+    if (existing) {
+      existing.status = status;
+      existing.stage = stage || existing.stage;
+      existing.assigned_to = assigned_to || existing.assigned_to;
+      existing.escalation = escalation || existing.escalation;
+      existing.metadata = metadata || existing.metadata;
+      existing.updated_at = Date.now();
+
+      return res.status(200).json({
+        status: "updated",
+        record: existing,
+      });
+    }
+
+    // Create new status record
+    const entry = {
+      dispatch_id,
+      status,          // pending | in_progress | waiting | completed | failed | escalated
+      stage: stage || "initial",
+      assigned_to: assigned_to || null,
+      escalation: escalation || null,
+      metadata: metadata || {},
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+
+    OPS_STATUS.unshift(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      record: entry,
+    });
+
+  } catch (err) {
+    console.error("ops status write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ops/status
+ * Retrieve operational task status.
+ */
+router.get("/ops/status", async (req: Request, res: Response) => {
+  try {
+    const { dispatch_id, assigned_to, status, limit } = req.query;
+
+    let results = [...OPS_STATUS];
+
+    if (dispatch_id) {
+      results = results.filter((s) => s.dispatch_id === dispatch_id);
+    }
+
+    if (assigned_to) {
+      results = results.filter((s) => s.assigned_to === assigned_to);
+    }
+
+    if (status) {
+      results = results.filter((s) => s.status === status);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ops status lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
