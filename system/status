@@ -1,0 +1,65 @@
+{
+  "system": "Beast System 3.0",
+  "version": "3.0.0",
+  "lifecycle": {
+    "state": "ACTIVE",
+    "mode": "production",
+    "bootTimestamp": "2026-05-03T07:10:00.000Z",
+    "uptimeMs": 128512991
+  },
+  "operationalState": {
+    "status": "OPERATIONAL",
+    "loadLevel": "nominal",
+    "currentOps": 42,
+    "queuedOps": 3,
+    "lastError": null
+  },
+  "modules": {
+    "ops": {
+      "state": "running",
+      "tasksProcessed": 1842,
+      "errorsLastHour": 0
+    },
+    "audit": {
+      "state": "running",
+      "chainHeight": 1842,
+      "integrity": "verified"
+    },
+    "governance": {
+      "state": "running",
+      "activeRulesets": 5,
+      "pendingProposals": 2
+    },
+    "registry": {
+      "state": "running",
+      "records": {
+        "identity": 1284,
+        "assets": 392,
+        "civic": 211
+      }
+    },
+    "identity": {
+      "state": "running",
+      "authRequests1h": 317,
+      "failedLogins1h": 0
+    },
+    "integrations": {
+      "state": "running",
+      "connectedSystems": 7,
+      "failedHandshakes1h": 0
+    },
+    "ui": {
+      "state": "running",
+      "activeSessions": 7,
+      "errorRate1m": 0.0
+    }
+  },
+  "telemetry": {
+    "cpuPct": 14.2,
+    "memoryPct": 41.7,
+    "diskPct": 22.9,
+    "networkInKbps": 184,
+    "networkOutKbps": 201
+  },
+  "timestamp": "2026-05-05T11:56:00.000Z"
+}
