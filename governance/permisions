@@ -1,0 +1,72 @@
+// beast-system-3-interfaces/src/governance/permissions.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+/**
+ * GET /governance/permissions
+ * Returns the permission registry and mappings to roles.
+ */
+router.get("/governance/permissions", async (req: Request, res: Response) => {
+  try {
+    // Permission registry (replace with DB/config source)
+    const permissions = [
+      {
+        permission: "all",
+        description: "Full unrestricted system authority",
+      },
+      {
+        permission: "policy:invoke",
+        description: "Invoke governance policies",
+      },
+      {
+        permission: "policy:review",
+        description: "Review or interpret policies",
+      },
+      {
+        permission: "ops:dispatch",
+        description: "Dispatch operational tasks",
+      },
+      {
+        permission: "ops:queue",
+        description: "Access operational queue",
+      },
+      {
+        permission: "wellbeing:triage",
+        description: "Perform wellbeing triage checks",
+      },
+      {
+        permission: "ethics:review",
+        description: "Review ethical-sensitive actions",
+      },
+      {
+        permission: "submit:requests",
+        description: "Submit general system requests",
+      },
+    ];
+
+    // Role → Permission mapping (replace with DB/config)
+    const rolePermissions = {
+      governing_officer: ["all"],
+      executive: ["policy:invoke", "ops:dispatch", "ethics:review"],
+      moderator: ["ops:dispatch", "wellbeing:triage"],
+      member: ["submit:requests"],
+    };
+
+    return res.status(200).json({
+      status: "ok",
+      permissions,
+      role_permissions: rolePermissions,
+    });
+
+  } catch (err) {
+    console.error("permissions endpoint error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
