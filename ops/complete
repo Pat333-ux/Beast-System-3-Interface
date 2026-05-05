@@ -1,0 +1,112 @@
+// beast-system-3-interfaces/src/ops/complete.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory completion log
+const OPS_COMPLETIONS: any[] = [];
+
+/**
+ * POST /ops/complete
+ * Mark an operational task as completed or failed.
+ */
+router.post("/ops/complete", async (req: Request, res: Response) => {
+  try {
+    const {
+      dispatch_id,
+      completed_by,
+      outcome,
+      result,
+      failure_reason,
+      metadata,
+    } = req.body || {};
+
+    if (!dispatch_id || !outcome) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          dispatch_id: !dispatch_id,
+          outcome: !outcome,
+        },
+      });
+    }
+
+    const entry = {
+      completion_id: cryptoRandomId(),
+      dispatch_id,
+      completed_by: completed_by || null,
+      outcome, // success | failure | partial | cancelled
+      result: result || {},
+      failure_reason: failure_reason || null,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    OPS_COMPLETIONS.unshift(entry);
+
+    return res.status(201).json({
+      status: "completed",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("ops complete write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ops/complete
+ * Retrieve completed operational tasks.
+ */
+router.get("/ops/complete", async (req: Request, res: Response) => {
+  try {
+    const { dispatch_id, completed_by, outcome, limit } = req.query;
+
+    let results = [...OPS_COMPLETIONS];
+
+    if (dispatch_id) {
+      results = results.filter((c) => c.dispatch_id === dispatch_id);
+    }
+
+    if (completed_by) {
+      results = results.filter((c) => c.completed_by === completed_by);
+    }
+
+    if (outcome) {
+      results = results.filter((c) => c.outcome === outcome);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ops complete lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Utility
+--------------------------------*/
+
+function cryptoRandomId() {
+  return "opsc_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
