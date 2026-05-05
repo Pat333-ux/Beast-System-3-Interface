@@ -1,0 +1,205 @@
+// beast-system-3-interfaces/src/integrations/oauth.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory OAuth client registry
+const OAUTH_CLIENTS: any[] = [];
+
+// In-memory authorization codes
+const AUTH_CODES: any[] = [];
+
+// In-memory access tokens
+const ACCESS_TOKENS: any[] = [];
+
+/* -------------------------------------------------------
+   1. REGISTER OAUTH CLIENT
+------------------------------------------------------- */
+
+router.post("/integrations/oauth/register", async (req: Request, res: Response) => {
+  try {
+    const { client_name, redirect_uris, scopes, metadata } = req.body || {};
+
+    if (!client_name || !redirect_uris) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const client = {
+      client_id: cryptoRandomId(),
+      client_secret: cryptoRandomSecret(),
+      client_name,
+      redirect_uris,
+      scopes: scopes || [],
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    OAUTH_CLIENTS.push(client);
+
+    return res.status(201).json({
+      status: "registered",
+      client,
+    });
+
+  } catch (err) {
+    console.error("oauth register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* -------------------------------------------------------
+   2. AUTHORIZE (AUTHORIZATION CODE FLOW)
+------------------------------------------------------- */
+
+router.post("/integrations/oauth/authorize", async (req: Request, res: Response) => {
+  try {
+    const { client_id, redirect_uri, scope, user_id } = req.body || {};
+
+    const client = OAUTH_CLIENTS.find((c) => c.client_id === client_id);
+
+    if (!client) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "client_not_found",
+      });
+    }
+
+    if (!client.redirect_uris.includes(redirect_uri)) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "invalid_redirect_uri",
+      });
+    }
+
+    const code = {
+      code: cryptoRandomId(),
+      client_id,
+      user_id,
+      scope,
+      redirect_uri,
+      created_at: Date.now(),
+      expires_at: Date.now() + 5 * 60 * 1000, // 5 minutes
+    };
+
+    AUTH_CODES.push(code);
+
+    return res.status(200).json({
+      status: "authorized",
+      code: code.code,
+    });
+
+  } catch (err) {
+    console.error("oauth authorize error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* -------------------------------------------------------
+   3. TOKEN EXCHANGE
+------------------------------------------------------- */
+
+router.post("/integrations/oauth/token", async (req: Request, res: Response) => {
+  try {
+    const { client_id, client_secret, code, grant_type } = req.body || {};
+
+    const client = OAUTH_CLIENTS.find(
+      (c) => c.client_id === client_id && c.client_secret === client_secret
+    );
+
+    if (!client) {
+      return res.status(401).json({
+        status: "rejected",
+        reason: "invalid_client_credentials",
+      });
+    }
+
+    if (grant_type === "authorization_code") {
+      const auth = AUTH_CODES.find((c) => c.code === code);
+
+      if (!auth) {
+        return res.status(400).json({
+          status: "rejected",
+          reason: "invalid_or_expired_code",
+        });
+      }
+
+      // Remove used code
+      AUTH_CODES.splice(AUTH_CODES.indexOf(auth), 1);
+
+      const token = {
+        access_token: cryptoRandomSecret(),
+        refresh_token: cryptoRandomSecret(),
+        client_id,
+        user_id: auth.user_id,
+        scope: auth.scope,
+        created_at: Date.now(),
+        expires_at: Date.now() + 60 * 60 * 1000, // 1 hour
+      };
+
+      ACCESS_TOKENS.push(token);
+
+      return res.status(200).json({
+        status: "ok",
+        token,
+      });
+    }
+
+    return res.status(400).json({
+      status: "rejected",
+      reason: "unsupported_grant_type",
+    });
+
+  } catch (err) {
+    console.error("oauth token error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* -------------------------------------------------------
+   4. TOKEN INTROSPECTION
+------------------------------------------------------- */
+
+router.post("/integrations/oauth/introspect", async (req: Request, res: Response) => {
+  try {
+    const { access_token } = req.body || {};
+
+    const token = ACCESS_TOKENS.find((t) => t.access_token === access_token);
+
+    if (!token) {
+      return res.status(200).json({
+        active: false,
+      });
+    }
+
+    return res.status(200).json({
+      active: true,
+      client_id: token.client_id,
+      user_id: token.user_id,
+      scope: token.scope,
+      expires_at: token.expires_at,
+    });
+
+  } catch (err) {
+    console.error("oauth introspect error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* -------------------------------------------------------
+   Utility
+------------------------------------------------------- */
+
+function cryptoRandomId() {
+  return "oauth_" + Math.random().toString(36).slice(2, 10);
+}
+
+function cryptoRandomSecret() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+export default router;
