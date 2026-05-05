@@ -1,0 +1,55 @@
+// beast-system-3-interfaces/src/governance/roles.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+/**
+ * GET /governance/roles
+ * Returns the role registry and authority levels.
+ */
+router.get("/governance/roles", async (req: Request, res: Response) => {
+  try {
+    // Example role registry (replace with DB or config source)
+    const roles = [
+      {
+        role: "governing_officer",
+        authority_level: 100,
+        permissions: ["all"],
+        description: "Top executive authority of the organization",
+      },
+      {
+        role: "executive",
+        authority_level: 80,
+        permissions: ["policy:invoke", "ops:dispatch", "ethics:review"],
+        description: "High-level command authority",
+      },
+      {
+        role: "moderator",
+        authority_level: 50,
+        permissions: ["ops:dispatch", "wellbeing:triage"],
+        description: "Mid-level operational authority",
+      },
+      {
+        role: "member",
+        authority_level: 10,
+        permissions: ["submit:requests"],
+        description: "Standard participant role",
+      },
+    ];
+
+    return res.status(200).json({
+      status: "ok",
+      roles,
+    });
+
+  } catch (err) {
+    console.error("roles endpoint error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
