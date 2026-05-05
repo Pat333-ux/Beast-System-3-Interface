@@ -1,43 +1,52 @@
-// beast-system-3-interfaces/src/governance/audit.ts
+// beast-system-3-interfaces/src/identity/registry.ts
 
 import express, { Request, Response } from "express";
 
 const router = express.Router();
 
-// In-memory audit log (replace with DB or chain-of-custody system)
-const AUDIT_LOG: any[] = [];
+// In-memory identity registry (replace with DB or identity-record.json)
+const IDENTITY_REGISTRY: any[] = [];
 
 /**
- * GET /governance/audit
- * Retrieve audit log entries with optional filters.
+ * GET /identity/registry
+ * Retrieve identity records with optional filters.
  */
-router.get("/governance/audit", async (req: Request, res: Response) => {
+router.get("/identity/registry", async (req: Request, res: Response) => {
   try {
-    const { actor_id, event_type, limit } = req.query;
+    const { identity_id, trust_min, attribute_key, attribute_value, limit } = req.query;
 
-    let entries = [...AUDIT_LOG];
+    let records = [...IDENTITY_REGISTRY];
 
-    // Optional filters
-    if (actor_id) {
-      entries = entries.filter((e) => e.actor_id === actor_id);
+    // Filter by identity_id
+    if (identity_id) {
+      records = records.filter((r) => r.identity_id === identity_id);
     }
 
-    if (event_type) {
-      entries = entries.filter((e) => e.event_type === event_type);
+    // Filter by minimum trust score
+    if (trust_min) {
+      records = records.filter((r) => r.trust_score >= Number(trust_min));
     }
 
+    // Filter by attribute key/value
+    if (attribute_key && attribute_value) {
+      records = records.filter(
+        (r) => r.attributes?.[attribute_key as string] === attribute_value
+      );
+    }
+
+    // Limit results
     if (limit) {
-      entries = entries.slice(0, Number(limit));
+      records = records.slice(0, Number(limit));
     }
 
     return res.status(200).json({
       status: "ok",
-      count: entries.length,
-      entries,
+      count: records.length,
+      records,
     });
 
   } catch (err) {
-    console.error("audit endpoint error:", err);
+    console.error("identity registry error:", err);
     return res.status(500).json({
       status: "error",
       reason: "internal_error",
@@ -46,41 +55,62 @@ router.get("/governance/audit", async (req: Request, res: Response) => {
 });
 
 /**
- * POST /governance/audit
- * Record an audit event.
+ * POST /identity/registry
+ * Register or update an identity record.
  */
-router.post("/governance/audit", async (req: Request, res: Response) => {
+router.post("/identity/registry", async (req: Request, res: Response) => {
   try {
-    const { actor_id, event_type, target, metadata } = req.body || {};
+    const { identity_id, attributes, credentials, lineage, trust_score } = req.body || {};
 
-    if (!actor_id || !event_type) {
+    if (!identity_id || !attributes || !credentials) {
       return res.status(400).json({
         status: "rejected",
         reason: "missing_required_fields",
         missing: {
-          actor_id: !actor_id,
-          event_type: !event_type,
+          identity_id: !identity_id,
+          attributes: !attributes,
+          credentials: !credentials,
         },
       });
     }
 
+    // Check if identity already exists
+    const existing = IDENTITY_REGISTRY.find((r) => r.identity_id === identity_id);
+
+    if (existing) {
+      // Update existing record
+      existing.attributes = attributes;
+      existing.credentials = credentials;
+      existing.lineage = lineage || existing.lineage;
+      existing.trust_score = trust_score || existing.trust_score;
+      existing.updated_at = Date.now();
+
+      return res.status(200).json({
+        status: "updated",
+        record: existing,
+      });
+    }
+
+    // Create new identity record
     const entry = {
-      actor_id,
-      event_type, // e.g. "read", "write", "modify", "execute", "access"
-      target: target || null,
-      metadata: metadata || {},
-      timestamp: Date.now(),
+      identity_id,
+      attributes,
+      credentials,
+      lineage: lineage || {},
+      trust_score: trust_score || 100,
+      created_at: Date.now(),
+      updated_at: Date.now(),
     };
 
-    AUDIT_LOG.unshift(entry);
+    IDENTITY_REGISTRY.push(entry);
 
     return res.status(201).json({
-      status: "recorded",
-      entry,
+      status: "registered",
+      record: entry,
     });
 
   } catch (err) {
-    console.error("audit write error:", err);
+    console.error("identity registry write error:", err);
     return res.status(500).json({
       status: "error",
       reason: "internal_error",
