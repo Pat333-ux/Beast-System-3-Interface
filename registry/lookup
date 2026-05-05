@@ -1,0 +1,128 @@
+// beast-system-3-interfaces/src/registry/lookup.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory universal registry (replace with DB or registry-index.json)
+const UNIVERSAL_REGISTRY: any[] = [];
+
+/**
+ * GET /registry/lookup
+ * Lookup registry entries using flexible filters.
+ */
+router.get("/registry/lookup", async (req: Request, res: Response) => {
+  try {
+    const {
+      registry_id,
+      entry_id,
+      type,
+      attribute_key,
+      attribute_value,
+      chain_id,
+      limit,
+    } = req.query;
+
+    let results = [...UNIVERSAL_REGISTRY];
+
+    // Filter by registry_id
+    if (registry_id) {
+      results = results.filter((r) => r.registry_id === registry_id);
+    }
+
+    // Filter by entry_id
+    if (entry_id) {
+      results = results.filter((r) => r.entry_id === entry_id);
+    }
+
+    // Filter by type (e.g., "identity", "governance", "artifact")
+    if (type) {
+      results = results.filter((r) => r.type === type);
+    }
+
+    // Filter by chain_id (for anchored entries)
+    if (chain_id) {
+      results = results.filter((r) => r.chain_id === chain_id);
+    }
+
+    // Attribute-based filtering
+    if (attribute_key && attribute_value) {
+      results = results.filter(
+        (r) => r.attributes?.[attribute_key as string] === attribute_value
+      );
+    }
+
+    // Limit results
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("registry lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /registry/lookup
+ * Register a new entry into the Universal Registry.
+ */
+router.post("/registry/lookup", async (req: Request, res: Response) => {
+  try {
+    const {
+      registry_id,
+      entry_id,
+      type,
+      attributes,
+      chain_id,
+      metadata,
+    } = req.body || {};
+
+    if (!registry_id || !entry_id || !type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          registry_id: !registry_id,
+          entry_id: !entry_id,
+          type: !type,
+        },
+      });
+    }
+
+    const entry = {
+      registry_id,
+      entry_id,
+      type,
+      attributes: attributes || {},
+      chain_id: chain_id || null,
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    UNIVERSAL_REGISTRY.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("registry write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
