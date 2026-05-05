@@ -1,0 +1,198 @@
+// beast-system-3-interfaces/src/ui/notifications.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory notification templates
+const NOTIFICATION_TEMPLATES: any[] = [];
+
+// In-memory delivered notifications
+const NOTIFICATIONS: any[] = [];
+
+/**
+ * POST /ui/notifications/register
+ * Register a new notification template.
+ */
+router.post("/ui/notifications/register", async (req: Request, res: Response) => {
+  try {
+    const { template_id, name, template, variables, channels, metadata } = req.body || {};
+
+    if (!name || !template || !channels) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          name: !name,
+          template: !template,
+          channels: !channels,
+        },
+      });
+    }
+
+    const entry = {
+      template_id: template_id || cryptoRandomId(),
+      name,
+      template,
+      variables: variables || [],
+      channels,
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    NOTIFICATION_TEMPLATES.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      template: entry,
+    });
+
+  } catch (err) {
+    console.error("notification register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /ui/notifications/send
+ * Render and deliver a notification.
+ */
+router.post("/ui/notifications/send", async (req: Request, res: Response) => {
+  try {
+    const { template_id, recipient_id, variables, priority, metadata } = req.body || {};
+
+    if (!template_id || !recipient_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const template = NOTIFICATION_TEMPLATES.find((t) => t.template_id === template_id);
+
+    if (!template) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "template_not_found",
+      });
+    }
+
+    const rendered = applyVariables(template.template, variables || {});
+
+    const notification = {
+      notification_id: cryptoRandomId(),
+      template_id,
+      recipient_id,
+      message: rendered,
+      channels: template.channels,
+      priority: priority || "normal",
+      metadata: metadata || {},
+      read: false,
+      timestamp: Date.now(),
+    };
+
+    NOTIFICATIONS.unshift(notification);
+
+    return res.status(200).json({
+      status: "sent",
+      notification,
+    });
+
+  } catch (err) {
+    console.error("notification send error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /ui/notifications/read
+ * Mark a notification as read.
+ */
+router.post("/ui/notifications/read", async (req: Request, res: Response) => {
+  try {
+    const { notification_id } = req.body || {};
+
+    if (!notification_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_notification_id",
+      });
+    }
+
+    const note = NOTIFICATIONS.find((n) => n.notification_id === notification_id);
+
+    if (!note) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "notification_not_found",
+      });
+    }
+
+    note.read = true;
+    note.read_at = Date.now();
+
+    return res.status(200).json({
+      status: "ok",
+      notification: note,
+    });
+
+  } catch (err) {
+    console.error("notification read error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /ui/notifications
+ * Retrieve notifications.
+ */
+router.get("/ui/notifications", async (req: Request, res: Response) => {
+  try {
+    const { recipient_id, unread, limit } = req.query;
+
+    let results = [...NOTIFICATIONS];
+
+    if (recipient_id) {
+      results = results.filter((n) => n.recipient_id === recipient_id);
+    }
+
+    if (unread === "true") {
+      results = results.filter((n) => !n.read);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      notifications: results,
+    });
+
+  } catch (err) {
+    console.error("notification lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Notification Logic
+--------------------------------*/
+
+function applyVariables(template: string, vars: any) {
+  let output = template;
+
+  for (const key in vars) {
+    const value = vars[key];
+    output = output.replace(new RegExp(`{{\\s*${key}\\s*}}`, "g"), value);
+  }
+
+  return output;
+}
+
+function cryptoRandomId() {
+  return "notif_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
