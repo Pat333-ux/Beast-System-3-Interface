@@ -1,0 +1,187 @@
+// beast-system-3-interfaces/src/audit/attest.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory audit chain (shared with audit/submit and audit/chain)
+const AUDIT_CHAIN: any[] = [];
+
+// In-memory attestation log
+const ATTEST_LOG: any[] = [];
+
+/**
+ * POST /audit/attest
+ * Generate a cryptographic attestation for an audit record or chain segment.
+ */
+router.post("/audit/attest", async (req: Request, res: Response) => {
+  try {
+    const { audit_id, from_index, to_index, metadata } = req.body || {};
+
+    if (!audit_id && from_index === undefined && to_index === undefined) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_target",
+        missing: {
+          audit_id: !audit_id,
+          from_index: from_index === undefined,
+          to_index: to_index === undefined,
+        },
+      });
+    }
+
+    let targetRecords: any[] = [];
+
+    // Single-record attestation
+    if (audit_id) {
+      const record = AUDIT_CHAIN.find((r) => r.audit_id === audit_id);
+      if (!record) {
+        return res.status(404).json({
+          status: "rejected",
+          reason: "audit_record_not_found",
+        });
+      }
+      targetRecords = [record];
+    }
+
+    // Range attestation
+    if (from_index !== undefined || to_index !== undefined) {
+      const start = from_index !== undefined ? Number(from_index) : 0;
+      const end = to_index !== undefined ? Number(to_index) : AUDIT_CHAIN.length - 1;
+
+      targetRecords = AUDIT_CHAIN.filter(
+        (r) => r.chain_index >= start && r.chain_index <= end
+      );
+    }
+
+    // 1. Compute attestation hash
+    const attestation_hash = sha256(targetRecords);
+
+    // 2. Build attestation object
+    const attestation = {
+      attestation_id: cryptoRandomId(),
+      audit_ids: targetRecords.map((r) => r.audit_id),
+      chain_range: {
+        from: targetRecords[targetRecords.length - 1]?.chain_index ?? null,
+        to: targetRecords[0]?.chain_index ?? null,
+      },
+      attestation_hash,
+      timestamp: Date.now(),
+      metadata: metadata || {},
+    };
+
+    // 3. Log attestation
+    ATTEST_LOG.unshift(attestation);
+
+    return res.status(201).json({
+      status: "attested",
+      attestation,
+    });
+
+  } catch (err) {
+    console.error("audit attest error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /audit/attest/verify
+ * Verify an attestation against the current audit chain.
+ */
+router.post("/audit/attest/verify", async (req: Request, res: Response) => {
+  try {
+    const { attestation_id } = req.body || {};
+
+    if (!attestation_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_attestation_id",
+      });
+    }
+
+    const attestation = ATTEST_LOG.find((a) => a.attestation_id === attestation_id);
+
+    if (!attestation) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "attestation_not_found",
+      });
+    }
+
+    // Reconstruct the target records
+    const targetRecords = AUDIT_CHAIN.filter((r) =>
+      attestation.audit_ids.includes(r.audit_id)
+    );
+
+    const computed = sha256(targetRecords);
+    const valid = computed === attestation.attestation_hash;
+
+    return res.status(200).json({
+      status: valid ? "valid" : "invalid",
+      attestation_id,
+      expected_hash: attestation.attestation_hash,
+      computed_hash: computed,
+    });
+
+  } catch (err) {
+    console.error("audit attest verify error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /audit/attest
+ * Retrieve attestations.
+ */
+router.get("/audit/attest", async (req: Request, res: Response) => {
+  try {
+    const { audit_id, limit } = req.query;
+
+    let results = [...ATTEST_LOG];
+
+    if (audit_id) {
+      results = results.filter((a) => a.audit_ids.includes(audit_id));
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("audit attest lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Utility
+--------------------------------*/
+
+function sha256(input: any) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(input))
+    .digest("hex");
+}
+
+function cryptoRandomId() {
+  return "attest_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
