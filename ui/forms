@@ -1,0 +1,261 @@
+// beast-system-3-interfaces/src/ui/forms.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory form registry
+const FORM_TEMPLATES: any[] = [];
+
+// In-memory form submissions
+const FORM_SUBMISSIONS: any[] = [];
+
+/**
+ * POST /ui/forms/register
+ * Register a new UI form template.
+ */
+router.post("/ui/forms/register", async (req: Request, res: Response) => {
+  try {
+    const { form_id, name, fields, metadata } = req.body || {};
+
+    if (!name || !fields) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          name: !name,
+          fields: !fields,
+        },
+      });
+    }
+
+    const entry = {
+      form_id: form_id || cryptoRandomId(),
+      name,
+      fields, // array of field definitions
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    FORM_TEMPLATES.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      form: entry,
+    });
+
+  } catch (err) {
+    console.error("ui forms register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /ui/forms
+ * Retrieve form templates.
+ */
+router.get("/ui/forms", async (req: Request, res: Response) => {
+  try {
+    const { form_id, name, limit } = req.query;
+
+    let results = [...FORM_TEMPLATES];
+
+    if (form_id) {
+      results = results.filter((f) => f.form_id === form_id);
+    }
+
+    if (name) {
+      results = results.filter((f) => f.name === name);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      forms: results,
+    });
+
+  } catch (err) {
+    console.error("ui forms lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /ui/forms/render
+ * Render a form schema for UI consumption.
+ */
+router.post("/ui/forms/render", async (req: Request, res: Response) => {
+  try {
+    const { form_id } = req.body || {};
+
+    if (!form_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_form_id",
+      });
+    }
+
+    const form = FORM_TEMPLATES.find((f) => f.form_id === form_id);
+
+    if (!form) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "form_not_found",
+      });
+    }
+
+    // Rendered form = schema + UI metadata
+    const rendered = {
+      form_id,
+      name: form.name,
+      fields: form.fields.map((field: any) => ({
+        ...field,
+        ui_component: inferComponent(field),
+      })),
+      metadata: form.metadata,
+    };
+
+    return res.status(200).json({
+      status: "ok",
+      rendered,
+    });
+
+  } catch (err) {
+    console.error("ui forms render error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /ui/forms/submit
+ * Submit a completed form.
+ */
+router.post("/ui/forms/submit", async (req: Request, res: Response) => {
+  try {
+    const { form_id, data, metadata } = req.body || {};
+
+    if (!form_id || !data) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const form = FORM_TEMPLATES.find((f) => f.form_id === form_id);
+
+    if (!form) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "form_not_found",
+      });
+    }
+
+    // Validate submission
+    const validation = validateSubmission(form.fields, data);
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "validation_failed",
+        errors: validation.errors,
+      });
+    }
+
+    const submission = {
+      submission_id: cryptoRandomId(),
+      form_id,
+      data,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    FORM_SUBMISSIONS.unshift(submission);
+
+    return res.status(201).json({
+      status: "submitted",
+      submission,
+    });
+
+  } catch (err) {
+    console.error("ui forms submit error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /ui/forms/submissions
+ * Retrieve form submissions.
+ */
+router.get("/ui/forms/submissions", async (req: Request, res: Response) => {
+  try {
+    const { form_id, limit } = req.query;
+
+    let results = [...FORM_SUBMISSIONS];
+
+    if (form_id) {
+      results = results.filter((s) => s.form_id === form_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      submissions: results,
+    });
+
+  } catch (err) {
+    console.error("ui forms submissions lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Form Logic
+--------------------------------*/
+
+function inferComponent(field: any) {
+  switch (field.type) {
+    case "text": return "input:text";
+    case "number": return "input:number";
+    case "date": return "input:date";
+    case "select": return "dropdown";
+    case "checkbox": return "checkbox";
+    case "textarea": return "textarea";
+    default: return "input:text";
+  }
+}
+
+function validateSubmission(fields: any[], data: any) {
+  const errors: any[] = [];
+
+  for (const field of fields) {
+    const value = data[field.id];
+
+    if (field.required && (value === undefined || value === null || value === "")) {
+      errors.push({ field: field.id, error: "required" });
+      continue;
+    }
+
+    if (field.type === "number" && value !== undefined && isNaN(Number(value))) {
+      errors.push({ field: field.id, error: "invalid_number" });
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+function cryptoRandomId() {
+  return "form_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
