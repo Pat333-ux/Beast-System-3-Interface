@@ -1,0 +1,166 @@
+// beast-system-3-interfaces/src/wellbeing/report.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory wellbeing check log (shared with wellbeing/check)
+const WELLBEING_CHECK_LOG: any[] = [];
+
+// In-memory wellbeing reports
+const WELLBEING_REPORTS: any[] = [];
+
+/**
+ * POST /wellbeing/report
+ * Generate a formal wellbeing report for a subject.
+ */
+router.post("/wellbeing/report", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, limit, metadata } = req.body || {};
+
+    if (!subject_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_subject_id",
+      });
+    }
+
+    // 1. Retrieve recent check-ins
+    const checks = WELLBEING_CHECK_LOG
+      .filter((c) => c.subject_id === subject_id)
+      .slice(0, limit ? Number(limit) : 5);
+
+    if (checks.length === 0) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "no_checkins_found",
+      });
+    }
+
+    // 2. Aggregate domain scores
+    const domainAverages = computeDomainAverages(checks);
+
+    // 3. Compute overall trend
+    const trend = computeTrend(checks);
+
+    // 4. Determine risk level
+    const risk_level = computeRiskLevel(domainAverages, trend);
+
+    // 5. Compile recommended pathways
+    const pathways = compilePathways(checks);
+
+    // 6. Build report object
+    const report = {
+      report_id: cryptoRandomId(),
+      subject_id,
+      generated_at: Date.now(),
+      domain_averages: domainAverages,
+      trend,
+      risk_level,
+      recent_checks: checks,
+      recommended_pathways: pathways,
+      metadata: metadata || {},
+    };
+
+    WELLBEING_REPORTS.unshift(report);
+
+    return res.status(200).json({
+      status: "ok",
+      report,
+    });
+
+  } catch (err) {
+    console.error("wellbeing report error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /wellbeing/report
+ * Retrieve wellbeing reports.
+ */
+router.get("/wellbeing/report", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, limit } = req.query;
+
+    let results = [...WELLBEING_REPORTS];
+
+    if (subject_id) {
+      results = results.filter((r) => r.subject_id === subject_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("wellbeing report lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Wellbeing Report Logic
+--------------------------------*/
+
+function computeDomainAverages(checks: any[]) {
+  const domains = Object.keys(checks[0].domains);
+  const averages: any = {};
+
+  for (const d of domains) {
+    const values = checks.map((c) => c.domains[d]);
+    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    averages[d] = Number(avg.toFixed(2));
+  }
+
+  return averages;
+}
+
+function computeTrend(checks: any[]) {
+  if (checks.length < 2) return "insufficient_data";
+
+  const first = checks[checks.length - 1].overall_score;
+  const last = checks[0].overall_score;
+
+  if (last > first + 10) return "improving";
+  if (last < first - 10) return "declining";
+  return "stable";
+}
+
+function computeRiskLevel(averages: any, trend: string) {
+  const lowDomains = Object.values(averages).filter((v: any) => v <= 1).length;
+
+  if (lowDomains >= 3 || trend === "declining") return "high";
+  if (lowDomains >= 1) return "moderate";
+  return "low";
+}
+
+function compilePathways(checks: any[]) {
+  const pathways = new Set<string>();
+
+  for (const c of checks) {
+    for (const p of c.pathways) {
+      pathways.add(p);
+    }
+  }
+
+  return Array.from(pathways);
+}
+
+function cryptoRandomId() {
+  return "wbr_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
