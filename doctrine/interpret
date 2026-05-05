@@ -1,0 +1,190 @@
+// beast-system-3-interfaces/src/doctrine/interpret.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory compiled doctrine store (replace with DB or doctrine-compiled.json)
+const COMPILED_DOCTRINE: any[] = [];
+
+/**
+ * POST /doctrine/interpret
+ * Interpret a doctrine rule, clause, or article in a given context.
+ */
+router.post("/doctrine/interpret", async (req: Request, res: Response) => {
+  try {
+    const {
+      doctrine_id,
+      article_id,
+      clause_id,
+      rule_id,
+      context,
+      metadata,
+    } = req.body || {};
+
+    if (!doctrine_id || !rule_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          doctrine_id: !doctrine_id,
+          rule_id: !rule_id,
+        },
+      });
+    }
+
+    // 1. Retrieve the compiled doctrine rule
+    const rule = COMPILED_DOCTRINE.find(
+      (r) =>
+        r.doctrine_id === doctrine_id &&
+        r.rule_id === rule_id &&
+        (!article_id || r.article_id === article_id) &&
+        (!clause_id || r.clause_id === clause_id)
+    );
+
+    if (!rule) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "rule_not_found",
+      });
+    }
+
+    // 2. Interpret the rule in the given context
+    const interpretation = interpretRule(rule, context || {});
+
+    // 3. Build interpretation record
+    const result = {
+      interpretation_id: cryptoRandomId(),
+      doctrine_id,
+      article_id: rule.article_id,
+      clause_id: rule.clause_id,
+      rule_id,
+      rule_text: rule.text,
+      constraint_type: rule.constraint_type,
+      severity: rule.severity,
+      tags: rule.tags,
+      context: context || {},
+      interpretation,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    return res.status(200).json({
+      status: "ok",
+      result,
+    });
+
+  } catch (err) {
+    console.error("doctrine interpret error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /doctrine/interpret
+ * Retrieve past interpretations.
+ */
+router.get("/doctrine/interpret", async (req: Request, res: Response) => {
+  try {
+    const { doctrine_id, rule_id, limit } = req.query;
+
+    let results = [...INTERPRETATION_LOG];
+
+    if (doctrine_id) {
+      results = results.filter((i) => i.doctrine_id === doctrine_id);
+    }
+
+    if (rule_id) {
+      results = results.filter((i) => i.rule_id === rule_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("interpret lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Interpretation Logic
+--------------------------------*/
+
+const INTERPRETATION_LOG: any[] = [];
+
+function interpretRule(rule: any, context: any) {
+  const { constraint_type, severity, tags } = rule;
+
+  const interpretation: any = {
+    applies: true,
+    reason: "rule_matched",
+    constraint_type,
+    severity,
+    tags,
+    effects: [],
+  };
+
+  // Hard limits always apply
+  if (constraint_type === "hard_limit") {
+    interpretation.effects.push("action_blocked");
+  }
+
+  // Soft limits generate warnings
+  if (constraint_type === "soft_limit") {
+    interpretation.effects.push("warning");
+  }
+
+  // Requirements check for missing context fields
+  if (constraint_type === "requirement") {
+    if (!context || Object.keys(context).length === 0) {
+      interpretation.applies = false;
+      interpretation.reason = "missing_context";
+    } else {
+      interpretation.effects.push("requirement_check_passed");
+    }
+  }
+
+  // Prohibitions block specific actions
+  if (constraint_type === "prohibition") {
+    interpretation.effects.push("prohibited_action");
+  }
+
+  // Tag-based modifiers
+  if (tags?.includes("safety")) {
+    interpretation.effects.push("safety_priority");
+  }
+
+  if (tags?.includes("ethics")) {
+    interpretation.effects.push("ethics_review_required");
+  }
+
+  // Log interpretation
+  INTERPRETATION_LOG.unshift({
+    ...interpretation,
+    rule_id: rule.rule_id,
+    doctrine_id: rule.doctrine_id,
+    timestamp: Date.now(),
+  });
+
+  return interpretation;
+}
+
+function cryptoRandomId() {
+  return "dpi_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
