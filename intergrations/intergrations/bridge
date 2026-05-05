@@ -1,0 +1,214 @@
+// beast-system-3-interfaces/src/integrations/bridge.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory bridge registry
+const BRIDGES: any[] = [];
+
+// In-memory bridge sync log
+const BRIDGE_SYNC_LOG: any[] = [];
+
+/**
+ * POST /integrations/bridge/register
+ * Register a bridge between Beast System and an external system.
+ */
+router.post("/integrations/bridge/register", async (req: Request, res: Response) => {
+  try {
+    const {
+      bridge_id,
+      name,
+      source_system,
+      target_system,
+      supported_operations,
+      sync_schema,
+      metadata,
+    } = req.body || {};
+
+    if (!name || !source_system || !target_system || !supported_operations) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          name: !name,
+          source_system: !source_system,
+          target_system: !target_system,
+          supported_operations: !supported_operations,
+        },
+      });
+    }
+
+    const entry = {
+      bridge_id: bridge_id || cryptoRandomId(),
+      name,
+      source_system,
+      target_system,
+      supported_operations,
+      sync_schema: sync_schema || {},
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    BRIDGES.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      bridge: entry,
+    });
+
+  } catch (err) {
+    console.error("bridge register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /integrations/bridge/sync
+ * Execute a bridge synchronization operation.
+ */
+router.post("/integrations/bridge/sync", async (req: Request, res: Response) => {
+  try {
+    const { bridge_id, operation, payload, metadata } = req.body || {};
+
+    if (!bridge_id || !operation || !payload) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+      });
+    }
+
+    const bridge = BRIDGES.find((b) => b.bridge_id === bridge_id);
+
+    if (!bridge) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "bridge_not_found",
+      });
+    }
+
+    // Validate operation
+    if (!bridge.supported_operations.includes(operation)) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "operation_not_supported",
+      });
+    }
+
+    // Apply sync schema transformation
+    const transformed = applySyncSchema(bridge.sync_schema, payload);
+
+    const record = {
+      sync_id: cryptoRandomId(),
+      bridge_id,
+      operation,
+      input: payload,
+      output: transformed,
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    BRIDGE_SYNC_LOG.unshift(record);
+
+    return res.status(200).json({
+      status: "ok",
+      result: record,
+    });
+
+  } catch (err) {
+    console.error("bridge sync error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /integrations/bridge
+ * Retrieve registered bridges or sync logs.
+ */
+router.get("/integrations/bridge", async (req: Request, res: Response) => {
+  try {
+    const { bridge_id, sync_log, limit } = req.query;
+
+    if (sync_log === "true") {
+      let results = [...BRIDGE_SYNC_LOG];
+
+      if (bridge_id) {
+        results = results.filter((s) => s.bridge_id === bridge_id);
+      }
+
+      if (limit) {
+        results = results.slice(0, Number(limit));
+      }
+
+      return res.status(200).json({
+        status: "ok",
+        count: results.length,
+        results,
+      });
+    }
+
+    // Otherwise return bridge registry
+    let results = [...BRIDGES];
+
+    if (bridge_id) {
+      results = results.filter((b) => b.bridge_id === bridge_id);
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      bridges: results,
+    });
+
+  } catch (err) {
+    console.error("bridge lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Bridge Sync Logic
+--------------------------------*/
+
+function applySyncSchema(schema: any, payload: any) {
+  const output: any = {};
+
+  for (const key in schema) {
+    const rule = schema[key];
+
+    // Direct mapping
+    if (typeof rule === "string") {
+      output[key] = payload[rule];
+      continue;
+    }
+
+    // Constant values
+    if (rule.type === "constant") {
+      output[key] = rule.value;
+      continue;
+    }
+
+    // Rename field
+    if (rule.type === "map") {
+      output[key] = payload[rule.from];
+      continue;
+    }
+
+    // Extract nested field
+    if (rule.type === "path") {
+      output[key] = rule.path.split(".").reduce((acc, part) => acc?.[part], payload);
+      continue;
+    }
+
+    // Default fallback
+    output[key] = null;
+  }
+
+  return output;
+}
+
+function cryptoRandomId() {
+  return "bridge_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
