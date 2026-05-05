@@ -1,0 +1,153 @@
+// beast-system-3-interfaces/src/doctrine/query.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory doctrine store (replace with DB or compiled-doctrine.json)
+const DOCTRINE_STORE: any[] = [];
+
+/**
+ * GET /doctrine/query
+ * Query doctrine articles, clauses, rules, or compiled constraints.
+ */
+router.get("/doctrine/query", async (req: Request, res: Response) => {
+  try {
+    const {
+      doctrine_id,
+      article_id,
+      clause_id,
+      rule_id,
+      constraint_type,
+      severity,
+      tag,
+      version,
+      limit,
+    } = req.query;
+
+    let results = [...DOCTRINE_STORE];
+
+    // Filter by doctrine_id
+    if (doctrine_id) {
+      results = results.filter((d) => d.doctrine_id === doctrine_id);
+    }
+
+    // Filter by article_id
+    if (article_id) {
+      results = results.filter((d) => d.article_id === article_id);
+    }
+
+    // Filter by clause_id
+    if (clause_id) {
+      results = results.filter((d) => d.clause_id === clause_id);
+    }
+
+    // Filter by rule_id
+    if (rule_id) {
+      results = results.filter((d) => d.rule_id === rule_id);
+    }
+
+    // Filter by constraint type (e.g., "hard_limit", "soft_limit", "prohibition", "requirement")
+    if (constraint_type) {
+      results = results.filter((d) => d.constraint_type === constraint_type);
+    }
+
+    // Filter by severity (0–100)
+    if (severity) {
+      results = results.filter((d) => d.severity >= Number(severity));
+    }
+
+    // Filter by tag
+    if (tag) {
+      results = results.filter((d) => d.tags?.includes(tag));
+    }
+
+    // Filter by version
+    if (version) {
+      results = results.filter((d) => d.version === version);
+    }
+
+    // Limit results
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("doctrine query error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /doctrine/query
+ * Register a compiled doctrine rule or clause.
+ */
+router.post("/doctrine/query", async (req: Request, res: Response) => {
+  try {
+    const {
+      doctrine_id,
+      article_id,
+      clause_id,
+      rule_id,
+      text,
+      constraint_type,
+      severity,
+      tags,
+      version,
+      metadata,
+    } = req.body || {};
+
+    if (!doctrine_id || !article_id || !clause_id || !rule_id || !constraint_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          doctrine_id: !doctrine_id,
+          article_id: !article_id,
+          clause_id: !clause_id,
+          rule_id: !rule_id,
+          constraint_type: !constraint_type,
+        },
+      });
+    }
+
+    const entry = {
+      doctrine_id,
+      article_id,
+      clause_id,
+      rule_id,
+      text: text || "",
+      constraint_type,
+      severity: severity || 0,
+      tags: tags || [],
+      version: version || "1.0.0",
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    DOCTRINE_STORE.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("doctrine query write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
