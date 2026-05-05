@@ -1,0 +1,135 @@
+// beast-system-3-interfaces/src/audit/logs.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory audit log (replace with DB or audit-log.json)
+const AUDIT_LOG: any[] = [];
+
+/**
+ * GET /audit/logs
+ * Retrieve audit log entries with filtering.
+ */
+router.get("/audit/logs", async (req: Request, res: Response) => {
+  try {
+    const {
+      event_type,
+      actor_id,
+      chain_id,
+      from,
+      to,
+      limit,
+    } = req.query;
+
+    let results = [...AUDIT_LOG];
+
+    // Filter by event type
+    if (event_type) {
+      results = results.filter((e) => e.event_type === event_type);
+    }
+
+    // Filter by actor
+    if (actor_id) {
+      results = results.filter((e) => e.actor_id === actor_id);
+    }
+
+    // Filter by chain ID
+    if (chain_id) {
+      results = results.filter((e) => e.chain_id === chain_id);
+    }
+
+    // Time range filtering
+    if (from) {
+      const fromTs = Number(from);
+      results = results.filter((e) => e.timestamp >= fromTs);
+    }
+
+    if (to) {
+      const toTs = Number(to);
+      results = results.filter((e) => e.timestamp <= toTs);
+    }
+
+    // Limit results
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("audit logs lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /audit/logs
+ * Append a new audit log entry (append-only).
+ */
+router.post("/audit/logs", async (req: Request, res: Response) => {
+  try {
+    const {
+      event_type,
+      actor_id,
+      target_id,
+      chain_id,
+      payload,
+      metadata,
+    } = req.body || {};
+
+    if (!event_type || !actor_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          event_type: !event_type,
+          actor_id: !actor_id,
+        },
+      });
+    }
+
+    const entry = {
+      audit_id: cryptoRandomId(),
+      event_type,
+      actor_id,
+      target_id: target_id || null,
+      chain_id: chain_id || null,
+      payload: payload || {},
+      metadata: metadata || {},
+      timestamp: Date.now(),
+    };
+
+    // Append-only
+    AUDIT_LOG.unshift(entry);
+
+    return res.status(201).json({
+      status: "logged",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("audit logs write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Utility
+--------------------------------*/
+
+function cryptoRandomId() {
+  return "audit_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
