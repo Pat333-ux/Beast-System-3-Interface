@@ -1,0 +1,179 @@
+// beast-system-3-interfaces/src/integrations/webhook.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory webhook registry
+const WEBHOOKS: any[] = [];
+
+// In-memory webhook event log
+const WEBHOOK_EVENTS: any[] = [];
+
+/**
+ * POST /integrations/webhook/register
+ * Register a webhook endpoint with secret + event types.
+ */
+router.post("/integrations/webhook/register", async (req: Request, res: Response) => {
+  try {
+    const { webhook_id, url, secret, event_types, metadata } = req.body || {};
+
+    if (!url || !secret || !event_types) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          url: !url,
+          secret: !secret,
+          event_types: !event_types,
+        },
+      });
+    }
+
+    const entry = {
+      webhook_id: webhook_id || cryptoRandomId(),
+      url,
+      secret,
+      event_types,
+      metadata: metadata || {},
+      created_at: Date.now(),
+    };
+
+    WEBHOOKS.push(entry);
+
+    return res.status(201).json({
+      status: "registered",
+      webhook: entry,
+    });
+
+  } catch (err) {
+    console.error("webhook register error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * POST /integrations/webhook
+ * Receive webhook events from external systems.
+ */
+router.post("/integrations/webhook", async (req: Request, res: Response) => {
+  try {
+    const signature = req.headers["x-webhook-signature"] as string;
+    const webhook_id = req.headers["x-webhook-id"] as string;
+
+    if (!signature || !webhook_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_signature_or_id",
+      });
+    }
+
+    const webhook = WEBHOOKS.find((w) => w.webhook_id === webhook_id);
+
+    if (!webhook) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "webhook_not_registered",
+      });
+    }
+
+    // 1. Validate signature
+    const computed = computeSignature(req.body, webhook.secret);
+    if (computed !== signature) {
+      return res.status(401).json({
+        status: "rejected",
+        reason: "invalid_signature",
+      });
+    }
+
+    const { event_type, payload } = req.body || {};
+
+    if (!event_type || !payload) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "invalid_event_format",
+      });
+    }
+
+    // 2. Validate event type
+    if (!webhook.event_types.includes(event_type)) {
+      return res.status(403).json({
+        status: "rejected",
+        reason: "event_type_not_allowed",
+      });
+    }
+
+    // 3. Build event record
+    const event = {
+      event_id: cryptoRandomId(),
+      webhook_id,
+      event_type,
+      payload,
+      received_at: Date.now(),
+      metadata: req.body.metadata || {},
+    };
+
+    WEBHOOK_EVENTS.unshift(event);
+
+    return res.status(200).json({
+      status: "accepted",
+      event,
+    });
+
+  } catch (err) {
+    console.error("webhook ingest error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/**
+ * GET /integrations/webhook
+ * Retrieve webhook events.
+ */
+router.get("/integrations/webhook", async (req: Request, res: Response) => {
+  try {
+    const { webhook_id, event_type, limit } = req.query;
+
+    let results = [...WEBHOOK_EVENTS];
+
+    if (webhook_id) {
+      results = results.filter((e) => e.webhook_id === webhook_id);
+    }
+
+    if (event_type) {
+      results = results.filter((e) => e.event_type === event_type);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("webhook lookup error:", err);
+    return res.status(500).json({ status: "error", reason: "internal_error" });
+  }
+});
+
+/* ------------------------------
+   Utility
+--------------------------------*/
+
+function computeSignature(body: any, secret: string) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(JSON.stringify(body))
+    .digest("hex");
+}
+
+function cryptoRandomId() {
+  return "wh_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
