@@ -1,0 +1,95 @@
+// beast-system-3-interfaces/src/governance/ledger.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory ledger stub (replace with DB or chain-of-custody system)
+const GOVERNANCE_LEDGER: any[] = [];
+
+/**
+ * GET /governance/ledger
+ * Returns the full governance ledger or filtered entries.
+ */
+router.get("/governance/ledger", async (req: Request, res: Response) => {
+  try {
+    const { actor_id, action_type, limit } = req.query;
+
+    let entries = [...GOVERNANCE_LEDGER];
+
+    // Optional filters
+    if (actor_id) {
+      entries = entries.filter((e) => e.actor_id === actor_id);
+    }
+
+    if (action_type) {
+      entries = entries.filter((e) => e.action_type === action_type);
+    }
+
+    if (limit) {
+      entries = entries.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: entries.length,
+      entries,
+    });
+
+  } catch (err) {
+    console.error("ledger endpoint error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * POST /governance/ledger
+ * Append a new entry to the governance ledger.
+ */
+router.post("/governance/ledger", async (req: Request, res: Response) => {
+  try {
+    const { action_id, actor_id, action_type, payload, context, metadata, result } = req.body || {};
+
+    if (!action_id || !actor_id || !action_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          action_id: !action_id,
+          actor_id: !actor_id,
+          action_type: !action_type,
+        },
+      });
+    }
+
+    const entry = {
+      action_id,
+      actor_id,
+      action_type,
+      payload: payload || {},
+      context: context || {},
+      metadata: metadata || {},
+      result: result || {},
+      timestamp: Date.now(),
+    };
+
+    GOVERNANCE_LEDGER.unshift(entry);
+
+    return res.status(201).json({
+      status: "recorded",
+      entry,
+    });
+
+  } catch (err) {
+    console.error("ledger write error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+export default router;
