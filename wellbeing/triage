@@ -1,0 +1,148 @@
+// beast-system-3-interfaces/src/wellbeing/triage.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory triage log
+const TRIAGE_LOG: any[] = [];
+
+// In-memory wellbeing check log (shared with wellbeing/check)
+const WELLBEING_CHECK_LOG: any[] = [];
+
+/**
+ * POST /wellbeing/triage
+ * Perform a triage evaluation based on the latest wellbeing check-in.
+ */
+router.post("/wellbeing/triage", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, metadata } = req.body || {};
+
+    if (!subject_id) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_subject_id",
+      });
+    }
+
+    // 1. Retrieve the most recent wellbeing check
+    const latest = WELLBEING_CHECK_LOG.find((c) => c.subject_id === subject_id);
+
+    if (!latest) {
+      return res.status(404).json({
+        status: "rejected",
+        reason: "no_recent_check_found",
+      });
+    }
+
+    // 2. Compute triage level
+    const triage_level = computeTriageLevel(latest);
+
+    // 3. Determine recommended actions
+    const actions = determineActions(triage_level, latest.signals);
+
+    // 4. Build triage record
+    const triage = {
+      triage_id: cryptoRandomId(),
+      subject_id,
+      triage_level,
+      signals: latest.signals,
+      status: latest.status,
+      recommended_actions: actions,
+      timestamp: Date.now(),
+      metadata: metadata || {},
+    };
+
+    TRIAGE_LOG.unshift(triage);
+
+    return res.status(200).json({
+      status: "ok",
+      triage,
+    });
+
+  } catch (err) {
+    console.error("wellbeing triage error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /wellbeing/triage
+ * Retrieve triage records.
+ */
+router.get("/wellbeing/triage", async (req: Request, res: Response) => {
+  try {
+    const { subject_id, limit } = req.query;
+
+    let results = [...TRIAGE_LOG];
+
+    if (subject_id) {
+      results = results.filter((t) => t.subject_id === subject_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("wellbeing triage lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Triage Logic
+--------------------------------*/
+
+function computeTriageLevel(check: any) {
+  const score = check.overall_score;
+  const signals = check.signals;
+
+  if (score < 40 || signals.includes("safety_alert")) return "emergency";
+  if (score < 60 || signals.includes("dignity_flag")) return "urgent";
+  if (score < 75) return "routine";
+  return "monitor";
+}
+
+function determineActions(level: string, signals: string[]) {
+  const actions: string[] = [];
+
+  if (level === "emergency") {
+    actions.push("dispatch_steward");
+    actions.push("activate_safety_protocol");
+    if (signals.includes("health_flag")) actions.push("health_intervention");
+  }
+
+  if (level === "urgent") {
+    actions.push("schedule_followup");
+    actions.push("assign_case_manager");
+  }
+
+  if (level === "routine") {
+    actions.push("send_checkin_reminder");
+  }
+
+  if (level === "monitor") {
+    actions.push("no_action_required");
+  }
+
+  return actions;
+}
+
+function cryptoRandomId() {
+  return "wbt_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
