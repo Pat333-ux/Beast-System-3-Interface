@@ -1,0 +1,36 @@
+// beast-system-3-interfaces/src/identity/verify.ts
+
+import express, { Request, Response } from "express";
+import crypto from "crypto";
+
+const router = express.Router();
+
+// In-memory identity registry (replace with DB or identity-record.json)
+const IDENTITY_REGISTRY: any[] = [];
+
+/**
+ * POST /identity/verify
+ * Verify an identity using attributes, credentials, and signatures.
+ */
+router.post("/identity/verify", async (req: Request, res: Response) => {
+  try {
+    const { identity_id, attributes, credentials, signature } = req.body || {};
+
+    // Basic validation
+    if (!identity_id || !attributes || !credentials) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          identity_id: !identity_id,
+          attributes: !attributes,
+          credentials: !credentials,
+        },
+      });
+    }
+
+    // 1. Lookup identity record
+    const record = IDENTITY_REGISTRY.find((i) => i.identity_id === identity_id);
+
+    if (!record) {
+      return res.status(404).
