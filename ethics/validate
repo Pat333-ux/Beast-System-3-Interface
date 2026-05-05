@@ -1,0 +1,182 @@
+// beast-system-3-interfaces/src/ethics/validate.ts
+
+import express, { Request, Response } from "express";
+
+const router = express.Router();
+
+// In-memory ethical validation log
+const ETHICS_LOG: any[] = [];
+
+/**
+ * POST /ethics/validate
+ * Validate an action using the Ethical Authority Framework (EAF).
+ */
+router.post("/ethics/validate", async (req: Request, res: Response) => {
+  try {
+    const { action_id, actor_id, action_type, payload, context, metadata } = req.body || {};
+
+    if (!action_id || !actor_id || !action_type) {
+      return res.status(400).json({
+        status: "rejected",
+        reason: "missing_required_fields",
+        missing: {
+          action_id: !action_id,
+          actor_id: !actor_id,
+          action_type: !action_type,
+        },
+      });
+    }
+
+    // 1. Dignity Check
+    const dignity = dignityCheck(payload, context);
+
+    // 2. Harm Check
+    const harm = harmCheck(payload, context);
+
+    // 3. Ethical Path Selection
+    const ethical_path = selectEthicalPath(dignity, harm, action_type);
+
+    // 4. Documentation Compliance
+    const documentation = documentationCheck(action_type, payload);
+
+    // 5. Final Decision
+    const decision = {
+      action_id,
+      actor_id,
+      action_type,
+      dignity,
+      harm,
+      ethical_path,
+      documentation,
+      approved:
+        dignity.status === "pass" &&
+        harm.status !== "high_risk" &&
+        documentation.status === "pass",
+      timestamp: Date.now(),
+      metadata: metadata || {},
+    };
+
+    ETHICS_LOG.unshift(decision);
+
+    return res.status(200).json({
+      status: "ok",
+      decision,
+    });
+
+  } catch (err) {
+    console.error("ethics validate error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/**
+ * GET /ethics/validate
+ * Retrieve ethical validation decisions.
+ */
+router.get("/ethics/validate", async (req: Request, res: Response) => {
+  try {
+    const { action_id, actor_id, limit } = req.query;
+
+    let results = [...ETHICS_LOG];
+
+    if (action_id) {
+      results = results.filter((e) => e.action_id === action_id);
+    }
+
+    if (actor_id) {
+      results = results.filter((e) => e.actor_id === actor_id);
+    }
+
+    if (limit) {
+      results = results.slice(0, Number(limit));
+    }
+
+    return res.status(200).json({
+      status: "ok",
+      count: results.length,
+      results,
+    });
+
+  } catch (err) {
+    console.error("ethics validate lookup error:", err);
+    return res.status(500).json({
+      status: "error",
+      reason: "internal_error",
+    });
+  }
+});
+
+/* ------------------------------
+   Ethical Authority Framework Logic
+--------------------------------*/
+
+function dignityCheck(payload: any, context: any) {
+  // Checks for violations of dignity, autonomy, or respect
+  const flags: string[] = [];
+
+  if (payload?.coercion === true) flags.push("coercion_detected");
+  if (payload?.humiliation === true) flags.push("humiliation_detected");
+  if (payload?.dehumanization === true) flags.push("dehumanization_detected");
+
+  return {
+    status: flags.length === 0 ? "pass" : "fail",
+    flags,
+  };
+}
+
+function harmCheck(payload: any, context: any) {
+  // Detects potential harm or risk
+  const signals: string[] = [];
+
+  if (payload?.risk === "high") signals.push("high_risk");
+  if (payload?.risk === "medium") signals.push("medium_risk");
+  if (context?.vulnerable_population === true) signals.push("vulnerability_flag");
+
+  let status = "low_risk";
+  if (signals.includes("high_risk")) status = "high_risk";
+  else if (signals.includes("medium_risk")) status = "medium_risk";
+
+  return {
+    status,
+    signals,
+  };
+}
+
+function selectEthicalPath(dignity: any, harm: any, action_type: string) {
+  if (dignity.status === "fail") return "halt";
+  if (harm.status === "high_risk") return "halt";
+  if (harm.status === "medium_risk") return "review";
+  return "proceed";
+}
+
+function documentationCheck(action_type: string, payload: any) {
+  // Ensures required documentation exists for sensitive actions
+  const sensitive = [
+    "identity_change",
+    "lineage_change",
+    "authority_delegation",
+    "wellbeing_override",
+    "documentation_override",
+  ];
+
+  if (!sensitive.includes(action_type)) {
+    return { status: "pass", missing: [] };
+  }
+
+  const required = ["justification", "source", "reviewer"];
+  const missing = required.filter((r) => !payload?.[r]);
+
+  return {
+    status: missing.length === 0 ? "pass" : "fail",
+    missing,
+  };
+}
+
+function cryptoRandomId() {
+  return "ethv_" + Math.random().toString(36).slice(2, 10);
+}
+
+export default router;
